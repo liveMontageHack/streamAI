@@ -86,7 +86,7 @@ class StreamAIApp:
         
         return True
     
-    async def start_recording(self, session_name=None):
+    async def start_recording(self, session_name=None, continuous=False):
         """Start a recording session"""
         if not await self.initialize():
             print("❌ Failed to initialize application")
@@ -99,10 +99,56 @@ class StreamAIApp:
             session_info = self.recording_manager.get_current_session_info()
             print(f"✅ Recording session started: {session_info['name']}")
             print(f"Session path: {session_info['path']}")
+            
+            if continuous:
+                await self._run_continuous_recording()
+            
             return True
         else:
             print("❌ Failed to start recording session")
             return False
+    
+    async def _run_continuous_recording(self):
+        """Run continuous recording mode with real-time monitoring"""
+        print("\n🔴 RECORDING IN PROGRESS")
+        print("=" * 50)
+        print("Press Ctrl+C to stop recording or use 'python main.py stop' in another terminal")
+        print("=" * 50)
+        
+        try:
+            last_status_time = datetime.now()
+            
+            while True:
+                # Get current session info
+                session_info = self.recording_manager.get_current_session_info()
+                
+                if not session_info or session_info.get('status') != 'recording':
+                    print("\n⚠️ Recording session ended externally")
+                    break
+                
+                # Show status every 10 seconds
+                current_time = datetime.now()
+                if (current_time - last_status_time).seconds >= 10:
+                    recording_status = session_info.get('live_recording_status', {})
+                    if recording_status.get('active'):
+                        print(f"📹 Recording: {recording_status.get('timecode', '00:00:00')} | "
+                              f"Size: {recording_status.get('bytes', 0) / (1024*1024):.1f} MB")
+                    
+                    stream_status = session_info.get('live_stream_status', {})
+                    if stream_status.get('active'):
+                        print(f"🔴 Streaming: {stream_status.get('timecode', '00:00:00')} | "
+                              f"Frames: {stream_status.get('total_frames', 0):,} | "
+                              f"Dropped: {stream_status.get('skipped_frames', 0)}")
+                    
+                    last_status_time = current_time
+                
+                # Wait 1 second before next check
+                await asyncio.sleep(1)
+                
+        except KeyboardInterrupt:
+            print("\n\n⏹️ Stopping recording...")
+            await self.stop_recording()
+            print("Recording stopped successfully!")
     
     async def stop_recording(self):
         """Stop the current recording session"""
@@ -259,11 +305,11 @@ async def main():
     )
     
     parser.add_argument('command', 
-                       choices=['status', 'start', 'stop', 'list', 'obs-data', 'youtube', 'test'],
+                       choices=['status', 'start', 'record', 'stop', 'list', 'obs-data', 'youtube', 'test'],
                        help='Command to execute')
     
     parser.add_argument('--session-name', '-s',
-                       help='Name for the recording session (for start command)')
+                       help='Name for the recording session (for start/record command)')
     
     parser.add_argument('--query', '-q',
                        help='Search query (for youtube command)')
@@ -275,23 +321,22 @@ async def main():
     
     app = StreamAIApp()
     try:
-        match args.command:
-            case 'start':
-                await app.start_recording(args.session_name)
-            case 'status':
-                await app.show_status()
-            case 'start':
-                await app.start_recording(args.session_name)
-            case 'stop':
-                await app.stop_recording()
-            case 'list':
-                await app.list_sessions()
-            case 'obs-data':
-                await app.get_obs_data()
-            case 'youtube':
-                await app.get_youtube_data(args.query, args.channel_id)
-            case 'test':
-                await app.run_tests()
+        if args.command == 'status':
+            await app.show_status()
+        elif args.command == 'start':
+            await app.start_recording(args.session_name, continuous=False)
+        elif args.command == 'record':
+            await app.start_recording(args.session_name, continuous=True)
+        elif args.command == 'stop':
+            await app.stop_recording()
+        elif args.command == 'list':
+            await app.list_sessions()
+        elif args.command == 'obs-data':
+            await app.get_obs_data()
+        elif args.command == 'youtube':
+            await app.get_youtube_data(args.query, args.channel_id)
+        elif args.command == 'test':
+            await app.run_tests()
     
     except KeyboardInterrupt:
         print("\nOperation cancelled by user")

@@ -80,11 +80,18 @@ python main.py status
 python main.py test
 ```
 
-**Start recording session**:
+**Start recording session (quick start/stop)**:
 ```bash
 python main.py start
 # or with custom session name
 python main.py start --session-name "my_recording_session"
+```
+
+**Start continuous recording session** (recommended):
+```bash
+python main.py record
+# or with custom session name
+python main.py record --session-name "my_live_session"
 ```
 
 **Stop recording session**:
@@ -95,6 +102,37 @@ python main.py stop
 **List all recording sessions**:
 ```bash
 python main.py list
+```
+
+### Recording Modes
+
+The app supports two recording modes:
+
+1. **Quick Mode** (`start` command):
+   - Starts recording and immediately exits
+   - Use for automated scripts or quick recordings
+   - Must use `stop` command to end recording
+
+2. **Continuous Mode** (`record` command) - **RECOMMENDED**:
+   - Starts recording and keeps running with real-time monitoring
+   - Shows live recording status every 10 seconds
+   - Press `Ctrl+C` to stop recording gracefully
+   - Can also use `python main.py stop` in another terminal
+
+**Example continuous recording session**:
+```bash
+# Terminal 1: Start continuous recording
+python main.py record --session-name "my_stream"
+
+# Output:
+# ✅ Recording session started: my_stream
+# 🔴 RECORDING IN PROGRESS
+# Press Ctrl+C to stop recording or use 'python main.py stop' in another terminal
+# 📹 Recording: 00:01:30 | Size: 45.2 MB
+# 🔴 Streaming: 00:01:30 | Frames: 2,700 | Dropped: 0
+
+# Terminal 2 (optional): Stop from another terminal
+python main.py stop
 ```
 
 ### Data Retrieval Commands
@@ -169,6 +207,107 @@ obs/
 | `RECORDINGS_PATH` | Local recordings directory | ./recordings |
 | `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) | INFO |
 
+## Development & Debugging
+
+### Python Debugger Setup
+
+For developers who want to debug the application, you can use Python's built-in debugger or IDE debugging features.
+
+#### Using Python Debugger (pdb)
+
+**Add breakpoints in code**:
+```python
+import pdb; pdb.set_trace()
+```
+
+**Run with debugger**:
+```bash
+python -m pdb main.py record --session-name "debug_session"
+```
+
+**Common pdb commands**:
+- `n` (next line)
+- `s` (step into function)
+- `c` (continue)
+- `l` (list current code)
+- `p variable_name` (print variable)
+- `q` (quit debugger)
+
+#### Using VS Code Debugger
+
+Create `.vscode/launch.json` for VS Code debugging:
+
+```json
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "StreamAI: Record Session",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/main.py",
+            "args": ["record", "--session-name", "debug_session"],
+            "cwd": "${workspaceFolder}/obs",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/obs/.env"
+        },
+        {
+            "name": "StreamAI: Status Check",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/main.py",
+            "args": ["status"],
+            "cwd": "${workspaceFolder}/obs",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/obs/.env"
+        },
+        {
+            "name": "StreamAI: Run Tests",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/main.py",
+            "args": ["test"],
+            "cwd": "${workspaceFolder}/obs",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/obs/.env"
+        },
+        {
+            "name": "StreamAI: Analytics",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/stream_analytics.py",
+            "cwd": "${workspaceFolder}/obs",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/obs/.env"
+        }
+    ]
+}
+```
+
+#### Debug Mode Environment
+
+Set debug logging in your `.env` file:
+```env
+LOG_LEVEL=DEBUG
+```
+
+This will provide detailed logging information for troubleshooting.
+
+### Advanced Analytics
+
+**Run detailed stream analytics**:
+```bash
+cd obs
+python stream_analytics.py
+```
+
+This provides comprehensive analysis including:
+- Performance metrics (FPS, frame drops)
+- Stream quality analysis
+- Audio configuration review
+- Network quality assessment
+- Optimization recommendations
+
 ## Troubleshooting
 
 ### Common Issues
@@ -189,9 +328,23 @@ obs/
 - Ensure sufficient disk space
 - Verify recording path permissions
 
+**Continuous Recording Stops Immediately**:
+- Check if OBS is actually recording (not just streaming)
+- Verify recording path is writable
+- Check OBS recording settings and output format
+
 ### Logs
 
 Application logs are saved to `recording_app.log` in the same directory. Check this file for detailed error information.
+
+**Enable debug logging**:
+```bash
+# Set in .env file
+LOG_LEVEL=DEBUG
+
+# Then run any command to see detailed logs
+python main.py status
+```
 
 ## Example Workflow
 

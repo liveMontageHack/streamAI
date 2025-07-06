@@ -2,36 +2,93 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Debug main.py with test",
-            "type": "debugpy",
+            "name": "StreamAI: Record Session",
+            "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/obs/main.py",
+            "args": ["record", "--session-name", "debug_session"],
+            "cwd": "${workspaceFolder}/obs",
             "console": "integratedTerminal",
-            "args": ["test"]
+            "envFile": "${workspaceFolder}/obs/.env"
         },
         {
-            "name": "Debug main.py with start",
-            "type": "debugpy",
+            "name": "StreamAI: Status Check",
+            "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/obs/main.py",
+            "args": ["status"],
+            "cwd": "${workspaceFolder}/obs",
             "console": "integratedTerminal",
-            "args": ["start"]
+            "envFile": "${workspaceFolder}/obs/.env"
         },
         {
-            "name": "Debug main.py with stop",
-            "type": "debugpy",
+            "name": "StreamAI: Quick Start Recording",
+            "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/obs/main.py",
+            "args": ["start", "--session-name", "debug_quick_session"],
+            "cwd": "${workspaceFolder}/obs",
             "console": "integratedTerminal",
-            "args": ["stop"]
+            "envFile": "${workspaceFolder}/obs/.env"
+        },
+        {
+            "name": "StreamAI: Stop Recording",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/main.py",
+            "args": ["stop"],
+            "cwd": "${workspaceFolder}/obs",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/obs/.env"
+        },
+        {
+            "name": "StreamAI: Run Tests",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/main.py",
+            "args": ["test"],
+            "cwd": "${workspaceFolder}/obs",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/obs/.env"
+        },
+        {
+            "name": "StreamAI: List Sessions",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/main.py",
+            "args": ["list"],
+            "cwd": "${workspaceFolder}/obs",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/obs/.env"
+        },
+        {
+            "name": "StreamAI: Get OBS Data",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/main.py",
+            "args": ["obs-data"],
+            "cwd": "${workspaceFolder}/obs",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/obs/.env"
+        },
+        {
+            "name": "StreamAI: Analytics",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/stream_analytics.py",
+            "cwd": "${workspaceFolder}/obs",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/obs/.env"
+        },
+        {
+            "name": "StreamAI: YouTube Search",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/main.py",
+            "args": ["youtube", "--query", "python tutorial"],
+            "cwd": "${workspaceFolder}/obs",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/obs/.env"
         }
-
     ]
 }
