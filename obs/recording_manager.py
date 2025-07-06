@@ -112,28 +112,44 @@ class RecordingManager:
     
     async def stop_recording_session(self):
         """Stop the current recording session"""
-        if not self.current_session:
-            self.logger.warning("No active session to stop")
-            return False
-        
         if not self.obs_controller.is_connected():
             self.logger.error("Cannot stop recording: OBS not connected")
             return False
         
+        # Check if there's an active OBS recording first
+        obs_status = self.obs_controller.get_recording_status()
+        if not obs_status or not obs_status['active']:
+            self.logger.warning("No active OBS recording to stop")
+            
+            # If we have a session, mark it as stopped anyway
+            if self.current_session:
+                self.current_session['status'] = 'stopped'
+                self.current_session['end_time'] = datetime.now()
+                self.logger.info(f"Session marked as stopped: {self.current_session['name']}")
+                return True
+            else:
+                self.logger.warning("No active session to stop")
+                return False
+        
         # Stop OBS recording
         result = self.obs_controller.stop_recording()
         if result:
-            self.current_session['status'] = 'stopped'
-            self.current_session['end_time'] = datetime.now()
-            
-            # If result contains file path, save it
-            if isinstance(result, str) and result != True:
-                self.current_session['obs_recordings'].append(result)
+            # Update session if exists
+            if self.current_session:
+                self.current_session['status'] = 'stopped'
+                self.current_session['end_time'] = datetime.now()
                 
-                # Copy recording to session folder
-                await self._copy_recording_to_session(result)
+                # If result contains file path, save it
+                if isinstance(result, str) and result != True:
+                    self.current_session['obs_recordings'].append(result)
+                    
+                    # Copy recording to session folder
+                    await self._copy_recording_to_session(result)
+                
+                self.logger.info(f"Recording session stopped: {self.current_session['name']}")
+            else:
+                self.logger.info("OBS recording stopped (no session was active)")
             
-            self.logger.info(f"Recording session stopped: {self.current_session['name']}")
             return True
         else:
             self.logger.error("Failed to stop OBS recording")

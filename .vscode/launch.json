@@ -1,0 +1,37 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Debug main.py with test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/main.py",
+            "console": "integratedTerminal",
+            "args": ["test"]
+        },
+        {
+            "name": "Debug main.py with start",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/main.py",
+            "console": "integratedTerminal",
+            "args": ["start"]
+        },
+        {
+            "name": "Debug main.py with stop",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/obs/main.py",
+            "console": "integratedTerminal",
+            "args": ["stop"]
+        }
+
+    ]
+}

@@ -274,22 +274,24 @@ async def main():
     args = parser.parse_args()
     
     app = StreamAIApp()
-    
     try:
-        if args.command == 'status':
-            await app.show_status()
-        elif args.command == 'start':
-            await app.start_recording(args.session_name)
-        elif args.command == 'stop':
-            await app.stop_recording()
-        elif args.command == 'list':
-            await app.list_sessions()
-        elif args.command == 'obs-data':
-            await app.get_obs_data()
-        elif args.command == 'youtube':
-            await app.get_youtube_data(args.query, args.channel_id)
-        elif args.command == 'test':
-            await app.run_tests()
+        match args.command:
+            case 'start':
+                await app.start_recording(args.session_name)
+            case 'status':
+                await app.show_status()
+            case 'start':
+                await app.start_recording(args.session_name)
+            case 'stop':
+                await app.stop_recording()
+            case 'list':
+                await app.list_sessions()
+            case 'obs-data':
+                await app.get_obs_data()
+            case 'youtube':
+                await app.get_youtube_data(args.query, args.channel_id)
+            case 'test':
+                await app.run_tests()
     
     except KeyboardInterrupt:
         print("\nOperation cancelled by user")
