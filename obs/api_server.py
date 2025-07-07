@@ -176,17 +176,21 @@ def get_transcription_prompt():
 
 @app.route('/api/transcription/refine', methods=['POST'])
 def refine_transcription():
-    """Refine transcription using the saved prompt"""
+    """Refine transcription using the provided or saved prompt"""
     global current_refinement_prompt
     try:
         data = request.get_json() or {}
         raw_text = data.get('raw_text', '')
+        provided_prompt = data.get('prompt', '')  # Accept prompt from request
         
         if not raw_text:
             return jsonify({"error": "No raw text provided"}), 400
         
-        if not current_refinement_prompt:
-            return jsonify({"error": "No refinement prompt set"}), 400
+        # Use provided prompt or fall back to saved prompt
+        prompt_to_use = provided_prompt.strip() or current_refinement_prompt
+        
+        if not prompt_to_use:
+            return jsonify({"error": "No refinement prompt provided or saved"}), 400
         
         # Import and use the refinement function
         try:
@@ -199,13 +203,13 @@ def refine_transcription():
             
             from refinement import refine_transcription
             
-            refined_text = refine_transcription(raw_text, current_refinement_prompt)
+            refined_text = refine_transcription(raw_text, prompt_to_use)
             
             return jsonify({
                 "success": True,
                 "refined_text": refined_text,
                 "original_text": raw_text,
-                "prompt_used": current_refinement_prompt
+                "prompt_used": prompt_to_use
             })
         except ImportError as e:
             return jsonify({"error": f"Could not import refinement module: {str(e)}"}), 500

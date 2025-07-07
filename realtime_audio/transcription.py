@@ -92,28 +92,36 @@ class Transcription:
                     prompt = prompt_data.get('prompt', '')
                     
                     if prompt:
-                        # Import refinement function
-                        from refinement import refine_transcription
-                        
-                        # Refine the transcription
-                        refined_text = refine_transcription(raw_transcription, prompt)
-                        print("[Groq] Refined:", refined_text)
-                        
-                        # Send refined transcription to API
-                        response = requests.post(
-                            f"{self.api_url}/api/transcription/add",
-                            json={
-                                "transcription": refined_text,
-                                "type": "refined",
-                                "original": raw_transcription,
-                                "timestamp": json.dumps(requests.utils.default_user_agent(), default=str)
-                            },
-                            headers={"Content-Type": "application/json"},
-                            timeout=2
-                        )
-                        
-                        if not response.ok:
-                            print(f"[API] Failed to send refined transcription: {response.status_code}")
+                        try:
+                            # Import refinement function
+                            from refinement import refine_transcription
+                            
+                            # Refine the transcription
+                            refined_text = refine_transcription(raw_transcription, prompt)
+                            print("[Groq] Refined:", refined_text)
+                            
+                            # Send refined transcription to API
+                            response = requests.post(
+                                f"{self.api_url}/api/transcription/add",
+                                json={
+                                    "transcription": refined_text,
+                                    "type": "refined",
+                                    "original": raw_transcription,
+                                    "timestamp": json.dumps(requests.utils.default_user_agent(), default=str)
+                                },
+                                headers={"Content-Type": "application/json"},
+                                timeout=2
+                            )
+                            
+                            if not response.ok:
+                                print(f"[API] Failed to send refined transcription: {response.status_code}")
+                                
+                        except Exception as groq_error:
+                            error_msg = str(groq_error)
+                            if "over capacity" in error_msg or "503" in error_msg:
+                                print(f"[Groq] API over capacity, skipping refinement for: {raw_transcription[:50]}...")
+                            else:
+                                print(f"[Groq] Refinement error: {error_msg}")
                     else:
                         print("[Groq] No refinement prompt set, skipping refinement")
                 else:
