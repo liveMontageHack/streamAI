@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Video, 
   Play, 
@@ -29,90 +29,19 @@ import {
   Maximize,
   Settings,
   Tag,
-  Check
+  Check,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
-
-interface Recording {
-  id: string;
-  title: string;
-  date: string;
-  duration: string;
-  size: string;
-  views: number;
-  thumbnail: string;
-  platforms: string[];
-  status: 'processing' | 'ready' | 'editing';
-  hasTranscription: boolean;
-  hasHighlights: boolean;
-  hasShorts: boolean;
-  categories: string[];
-  isManualUpload?: boolean;
-}
+import { videoProcessingAPI, TaskStatus, UploadOptions } from '../services/videoProcessingAPI';
+import { recordingsService } from '../services/recordingsService';
+import { Recording } from '../types/Recording';
+import ProcessingProgress from './ProcessingProgress';
+import ProcessedResults from './ProcessedResults';
 
 const Recordings: React.FC = () => {
-  const [recordings, setRecordings] = useState<Recording[]>([
-    {
-      id: '1',
-      title: 'Epic Gaming Session - New Game Release',
-      date: '2024-01-15',
-      duration: '2:34:12',
-      size: '4.2 GB',
-      views: 1247,
-      thumbnail: 'https://images.pexels.com/photos/442576/pexels-photo-442576.jpeg?auto=compress&cs=tinysrgb&w=400',
-      platforms: ['Twitch', 'YouTube'],
-      status: 'ready',
-      hasTranscription: true,
-      hasHighlights: true,
-      hasShorts: true,
-      categories: ['Gaming', 'Entertainment']
-    },
-    {
-      id: '2',
-      title: 'Community Q&A and Discussion',
-      date: '2024-01-14',
-      duration: '1:45:30',
-      size: '2.8 GB',
-      views: 892,
-      thumbnail: 'https://images.pexels.com/photos/1181673/pexels-photo-1181673.jpeg?auto=compress&cs=tinysrgb&w=400',
-      platforms: ['Discord', 'YouTube'],
-      status: 'processing',
-      hasTranscription: true,
-      hasHighlights: false,
-      hasShorts: false,
-      categories: ['Just Chatting', 'Community']
-    },
-    {
-      id: '3',
-      title: 'Tutorial: Advanced Streaming Setup',
-      date: '2024-01-13',
-      duration: '3:12:45',
-      size: '5.1 GB',
-      views: 2156,
-      thumbnail: 'https://images.pexels.com/photos/1181677/pexels-photo-1181677.jpeg?auto=compress&cs=tinysrgb&w=400',
-      platforms: ['Twitch', 'YouTube', 'Discord'],
-      status: 'ready',
-      hasTranscription: true,
-      hasHighlights: true,
-      hasShorts: true,
-      categories: ['Education', 'Technology']
-    },
-    {
-      id: '4',
-      title: 'Late Night Coding Stream',
-      date: '2024-01-12',
-      duration: '4:20:15',
-      size: '6.8 GB',
-      views: 567,
-      thumbnail: 'https://images.pexels.com/photos/1181244/pexels-photo-1181244.jpeg?auto=compress&cs=tinysrgb&w=400',
-      platforms: ['Twitch'],
-      status: 'editing',
-      hasTranscription: true,
-      hasHighlights: false,
-      hasShorts: false,
-      categories: ['Programming', 'Education'],
-      isManualUpload: true
-    }
-  ]);
+  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [isLoadingRecordings, setIsLoadingRecordings] = useState(true);
 
   const [selectedRecording, setSelectedRecording] = useState<Recording | null>(null);
   const [filterStatus, setFilterStatus] = useState('all');
@@ -123,6 +52,18 @@ const Recordings: React.FC = () => {
   const [showVideoPlayer, setShowVideoPlayer] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+
+  // AutoMontage states
+  const [processingStates, setProcessingStates] = useState<Record<string, {
+    isProcessing: boolean;
+    taskStatus: TaskStatus | null;
+    uploadProgress: number;
+    estimatedTime?: string;
+    showProgress: boolean;
+    showResults: boolean;
+    stopPolling?: () => void;
+  }>>({});
+  const [apiConnected, setApiConnected] = useState<boolean | null>(null);
 
   // Upload form state
   const [uploadForm, setUploadForm] = useState({
@@ -224,6 +165,261 @@ const Recordings: React.FC = () => {
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Load recordings on component mount
+  useEffect(() => {
+    const loadRecordings = async () => {
+      try {
+        setIsLoadingRecordings(true);
+        const realRecordings = await recordingsService.getRecordings();
+        setRecordings(realRecordings);
+      } catch (error) {
+        console.error('Failed to load recordings:', error);
+        // Keep demo recordings if API fails
+      } finally {
+        setIsLoadingRecordings(false);
+      }
+    };
+
+    loadRecordings();
+  }, []);
+
+  // AutoMontage functions
+  React.useEffect(() => {
+    // Test API connection on component mount
+    const testConnection = async () => {
+      try {
+        const connected = await videoProcessingAPI.testConnection();
+        setApiConnected(connected);
+      } catch (error) {
+        console.error('Failed to test API connection:', error);
+        setApiConnected(false);
+      }
+    };
+
+    testConnection();
+  }, []);
+
+  const handleAutoMontage = async (recording: Recording) => {
+    if (!recording) return;
+
+    // Check if already processing
+    if (processingStates[recording.id]?.isProcessing) {
+      return;
+    }
+
+    // For demo purposes, we'll simulate uploading the video file
+    // In a real scenario, you'd need to get the actual video file
+    const demoVideoFile = new File(['demo video content'], `${recording.title}.mp4`, {
+      type: 'video/mp4'
+    });
+
+    try {
+      // Initialize processing state
+      setProcessingStates(prev => ({
+        ...prev,
+        [recording.id]: {
+          isProcessing: true,
+          taskStatus: null,
+          uploadProgress: 0,
+          estimatedTime: videoProcessingAPI.estimateProcessingTime(demoVideoFile.size),
+          showProgress: true,
+          showResults: false
+        }
+      }));
+
+      // Simulate upload progress
+      const uploadInterval = setInterval(() => {
+        setProcessingStates(prev => {
+          const current = prev[recording.id];
+          if (!current || current.uploadProgress >= 100) {
+            clearInterval(uploadInterval);
+            return prev;
+          }
+          return {
+            ...prev,
+            [recording.id]: {
+              ...current,
+              uploadProgress: Math.min(current.uploadProgress + 10, 100)
+            }
+          };
+        });
+      }, 200);
+
+      // Upload video for processing
+      const uploadResponse = await videoProcessingAPI.uploadVideoForProcessing(demoVideoFile, {
+        subtitle_model: 'base',
+        priority: 1
+      });
+
+      clearInterval(uploadInterval);
+
+      // Update state with upload response
+      setProcessingStates(prev => ({
+        ...prev,
+        [recording.id]: {
+          ...prev[recording.id],
+          uploadProgress: 100,
+          taskStatus: {
+            task_id: uploadResponse.task_id,
+            status: 'uploaded',
+            filename: uploadResponse.filename,
+            size: uploadResponse.size,
+            config: uploadResponse.config
+          } as TaskStatus
+        }
+      }));
+
+      // Start polling for progress
+      const stopPolling = await videoProcessingAPI.pollTaskProgress(
+        uploadResponse.task_id,
+        // onProgress
+        (status: TaskStatus) => {
+          setProcessingStates(prev => ({
+            ...prev,
+            [recording.id]: {
+              ...prev[recording.id],
+              taskStatus: status
+            }
+          }));
+        },
+        // onComplete
+        (status: TaskStatus) => {
+          setProcessingStates(prev => ({
+            ...prev,
+            [recording.id]: {
+              ...prev[recording.id],
+              isProcessing: false,
+              taskStatus: status,
+              showProgress: false,
+              showResults: true
+            }
+          }));
+
+          // Update recording to show it has highlights
+          setRecordings(prevRecordings => 
+            prevRecordings.map(r => 
+              r.id === recording.id 
+                ? { ...r, hasHighlights: true, hasTranscription: true }
+                : r
+            )
+          );
+        },
+        // onError
+        (error: Error) => {
+          console.error('Processing error:', error);
+          setProcessingStates(prev => ({
+            ...prev,
+            [recording.id]: {
+              ...prev[recording.id],
+              isProcessing: false,
+              taskStatus: {
+                task_id: uploadResponse.task_id,
+                status: 'error',
+                message: error.message
+              } as TaskStatus
+            }
+          }));
+        }
+      );
+
+      // Store stop polling function
+      setProcessingStates(prev => ({
+        ...prev,
+        [recording.id]: {
+          ...prev[recording.id],
+          stopPolling
+        }
+      }));
+
+    } catch (error) {
+      console.error('AutoMontage error:', error);
+      setProcessingStates(prev => ({
+        ...prev,
+        [recording.id]: {
+          isProcessing: false,
+          taskStatus: {
+            task_id: '',
+            status: 'error',
+            message: error instanceof Error ? error.message : 'Unknown error'
+          } as TaskStatus,
+          uploadProgress: 0,
+          showProgress: false,
+          showResults: false
+        }
+      }));
+    }
+  };
+
+  const handleCancelProcessing = (recordingId: string) => {
+    const processingState = processingStates[recordingId];
+    if (processingState?.stopPolling) {
+      processingState.stopPolling();
+    }
+
+    setProcessingStates(prev => ({
+      ...prev,
+      [recordingId]: {
+        ...prev[recordingId],
+        isProcessing: false,
+        showProgress: false
+      }
+    }));
+  };
+
+  const handleCloseProgress = (recordingId: string) => {
+    setProcessingStates(prev => ({
+      ...prev,
+      [recordingId]: {
+        ...prev[recordingId],
+        showProgress: false
+      }
+    }));
+  };
+
+  const handleCloseResults = (recordingId: string) => {
+    setProcessingStates(prev => ({
+      ...prev,
+      [recordingId]: {
+        ...prev[recordingId],
+        showResults: false
+      }
+    }));
+  };
+
+  const getAutoMontageButtonState = (recording: Recording) => {
+    const processingState = processingStates[recording.id];
+    
+    if (processingState?.isProcessing) {
+      return {
+        text: 'Traitement...',
+        disabled: true,
+        icon: <Loader2 className="w-4 h-4 animate-spin" />
+      };
+    }
+    
+    if (processingState?.taskStatus?.status === 'completed' || processingState?.taskStatus?.status === 'completed_simple') {
+      return {
+        text: 'Voir résultats',
+        disabled: false,
+        icon: <Check className="w-4 h-4" />
+      };
+    }
+    
+    if (recording.hasHighlights) {
+      return {
+        text: 'Régénérer',
+        disabled: false,
+        icon: <Scissors className="w-4 h-4" />
+      };
+    }
+    
+    return {
+      text: 'Lancer AutoMontage',
+      disabled: apiConnected === false,
+      icon: <Scissors className="w-4 h-4" />
+    };
   };
 
   return (
@@ -568,19 +764,18 @@ const Recordings: React.FC = () => {
 
               {/* Video Player */}
               <div className="relative bg-black rounded-xl overflow-hidden mb-6">
-                <img 
-                  src={selectedRecording.thumbnail} 
-                  alt={selectedRecording.title}
-                  className="w-full h-96 object-cover"
-                />
-                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                  <button
-                    onClick={() => setIsPlaying(!isPlaying)}
-                    className="bg-white/20 backdrop-blur-md border border-white/30 text-white p-4 rounded-full hover:bg-white/30 transition-all duration-200"
-                  >
-                    {isPlaying ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8" />}
-                  </button>
-                </div>
+                <video 
+                  controls
+                  className="w-full h-96 object-contain"
+                  src={`http://localhost:5001/api/recordings/${selectedRecording.id}/file`}
+                  poster={selectedRecording.thumbnail}
+                  onLoadedMetadata={(e) => {
+                    const video = e.target as HTMLVideoElement;
+                    console.log('Video duration:', video.duration);
+                  }}
+                >
+                  Votre navigateur ne supporte pas la lecture vidéo.
+                </video>
                 
                 {/* Video Controls Overlay */}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
@@ -787,13 +982,47 @@ const Recordings: React.FC = () => {
                           <p className="text-gray-400 text-sm">AI creates highlight reels automatically</p>
                         </div>
                       </div>
-                      <button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200">
-                        Generate
+                      <button 
+                        onClick={() => {
+                          const buttonState = getAutoMontageButtonState(selectedRecording);
+                          if (buttonState.text === 'Voir résultats') {
+                            setProcessingStates(prev => ({
+                              ...prev,
+                              [selectedRecording.id]: {
+                                ...prev[selectedRecording.id],
+                                showResults: true
+                              }
+                            }));
+                          } else {
+                            handleAutoMontage(selectedRecording);
+                          }
+                        }}
+                        disabled={getAutoMontageButtonState(selectedRecording).disabled}
+                        className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center space-x-2"
+                      >
+                        {getAutoMontageButtonState(selectedRecording).icon}
+                        <span>{getAutoMontageButtonState(selectedRecording).text}</span>
                       </button>
                     </div>
                     <div className="text-gray-400 text-sm">
-                      Status: {selectedRecording.hasHighlights ? 'Ready' : 'Not generated'}
+                      Status: {(() => {
+                        const processingState = processingStates[selectedRecording.id];
+                        if (processingState?.isProcessing) return 'Traitement en cours...';
+                        if (processingState?.taskStatus?.status === 'completed' || processingState?.taskStatus?.status === 'completed_simple') return 'Traitement terminé';
+                        if (processingState?.taskStatus?.status === 'error') return 'Erreur de traitement';
+                        if (selectedRecording.hasHighlights) return 'Ready';
+                        if (apiConnected === false) return 'API non disponible';
+                        return 'Not generated';
+                      })()}
                     </div>
+                    {apiConnected === false && (
+                      <div className="mt-2 p-2 bg-red-600/10 border border-red-600/20 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <AlertCircle className="w-4 h-4 text-red-400" />
+                          <span className="text-red-400 text-xs">Impossible de se connecter à l'API de traitement vidéo</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Transcription */}
@@ -885,8 +1114,17 @@ const Recordings: React.FC = () => {
         </div>
       )}
 
+      {/* Loading State */}
+      {isLoadingRecordings && (
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-12 text-center">
+          <Loader2 className="w-16 h-16 text-gray-400 mx-auto mb-4 animate-spin" />
+          <h3 className="text-xl font-semibold text-white mb-2">Chargement des enregistrements...</h3>
+          <p className="text-gray-400">Récupération des vidéos depuis le système de fichiers</p>
+        </div>
+      )}
+
       {/* Empty State */}
-      {filteredRecordings.length === 0 && (
+      {!isLoadingRecordings && filteredRecordings.length === 0 && (
         <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-12 text-center">
           <Video className="w-16 h-16 text-gray-400 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-white mb-2">No recordings found</h3>
@@ -911,6 +1149,51 @@ const Recordings: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* Processing Progress Modals */}
+      {Object.entries(processingStates).map(([recordingId, state]) => {
+        if (!state.showProgress) return null;
+        
+        return (
+          <ProcessingProgress
+            key={`progress-${recordingId}`}
+            isOpen={state.showProgress}
+            onClose={() => handleCloseProgress(recordingId)}
+            taskStatus={state.taskStatus}
+            uploadProgress={state.uploadProgress}
+            estimatedTime={state.estimatedTime}
+            onCancel={() => handleCancelProcessing(recordingId)}
+          />
+        );
+      })}
+
+      {/* Processing Results Modals */}
+      {Object.entries(processingStates).map(([recordingId, state]) => {
+        if (!state.showResults || !state.taskStatus) return null;
+        
+        return (
+          <div key={`results-${recordingId}`} className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+            <div className="bg-gray-900/95 backdrop-blur-md border border-white/20 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-2xl font-bold text-white">Résultats AutoMontage</h3>
+                  <button
+                    onClick={() => handleCloseResults(recordingId)}
+                    className="bg-white/10 hover:bg-white/20 border border-white/20 text-white p-2 rounded-lg transition-all duration-200"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <ProcessedResults
+                  taskStatus={state.taskStatus}
+                  onClose={() => handleCloseResults(recordingId)}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 };

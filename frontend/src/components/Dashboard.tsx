@@ -23,6 +23,7 @@ import {
   X,
   Check
 } from 'lucide-react';
+import IntegratedRecording from './IntegratedRecording';
 
 const Dashboard: React.FC = () => {
   const [twitchEnabled, setTwitchEnabled] = useState(true);
@@ -67,50 +68,16 @@ const Dashboard: React.FC = () => {
       return;
     }
 
-    try {
-      if (isRecording) {
-        // Stop recording
-        const response = await fetch('http://localhost:5001/api/recording/stop', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-
-        const result = await response.json();
-        
-        if (result.success) {
-          setIsRecording(false);
-          console.log('Recording stopped successfully');
-        } else {
-          console.error('Failed to stop recording:', result.message);
-          alert('Failed to stop recording: ' + result.message);
-        }
-      } else {
-        // Start recording with stream title as session name
-        const response = await fetch('http://localhost:5001/api/recording/start', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            sessionName: streamTitle.trim()
-          }),
-        });
-
-        const result = await response.json();
-        
-        if (result.success) {
-          setIsRecording(true);
-          console.log('Recording started successfully with session:', streamTitle);
-        } else {
-          console.error('Failed to start recording:', result.message);
-          alert('Failed to start recording: ' + result.message);
-        }
-      }
-    } catch (error) {
-      console.error('Error communicating with API:', error);
-      alert('Error: Could not connect to StreamAI API server. Make sure it\'s running on port 5001.');
+    // Simulate recording toggle for demo purposes
+    // In a real implementation, this would connect to OBS or recording software
+    setIsRecording(!isRecording);
+    
+    if (!isRecording) {
+      console.log('Recording started (demo mode):', streamTitle);
+      alert('Recording started in demo mode. For real recording, connect OBS or recording software.');
+    } else {
+      console.log('Recording stopped (demo mode)');
+      alert('Recording stopped in demo mode.');
     }
   };
 
@@ -498,6 +465,24 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
+        {/* Enregistrement Intégré OBS + Vultr */}
+        <div className="mb-8">
+          <IntegratedRecording
+            onRecordingStarted={(data) => {
+              console.log('Enregistrement démarré depuis Dashboard:', data);
+              setIsRecording(true);
+            }}
+            onRecordingStopped={(data) => {
+              console.log('Enregistrement arrêté depuis Dashboard:', data);
+              setIsRecording(false);
+            }}
+            onError={(error) => {
+              console.error('Erreur d\'enregistrement:', error);
+              alert(`Erreur d'enregistrement: ${error}`);
+            }}
+          />
+        </div>
+
         {/* Stream Control Center */}
         <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 mb-8">
           <h2 className="text-2xl font-semibold text-white mb-6 flex items-center space-x-2">
@@ -589,28 +574,6 @@ const Dashboard: React.FC = () => {
                   <>
                     <Play className="w-8 h-8" />
                     <span>Start Stream</span>
-                  </>
-                )}
-              </button>
-
-              {/* Record Button */}
-              <button
-                onClick={handleStartRecord}
-                className={`w-full py-6 px-6 rounded-xl font-semibold text-lg transition-all duration-300 transform hover:scale-105 flex items-center justify-center space-x-3 ${
-                  isRecording
-                    ? 'bg-gradient-to-r from-red-600 to-pink-600 hover:from-red-700 hover:to-pink-700 text-white shadow-lg shadow-red-500/25'
-                    : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-lg shadow-purple-500/25'
-                }`}
-              >
-                {isRecording ? (
-                  <>
-                    <Pause className="w-6 h-6" />
-                    <span>Stop Recording</span>
-                  </>
-                ) : (
-                  <>
-                    <Radio className="w-6 h-6" />
-                    <span>Start Recording</span>
                   </>
                 )}
               </button>
