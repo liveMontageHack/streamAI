@@ -1,0 +1,10 @@
+{
+  "preset": "balanced",
+  "original_duration": "00:10:30",
+  "edited_duration": "00:08:45",
+  "time_saved": 105,
+  "compression_ratio": 83.3,
+  "segments_removed": 15,
+  "silence_removed": "01:25",
+  "hesitations_removed": "00:20"
+}

@@ -14,11 +14,13 @@ import json
 import threading
 import time
 import os
+import shutil
 import cv2
 from pathlib import Path
 from datetime import datetime
 from recording_manager import RecordingManager
 from main import StreamAIApp
+from video_processor import StreamAIVideoProcessor
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -28,6 +30,9 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Global app instance
 stream_app = StreamAIApp()
+
+# Initialize video processor
+video_processor = StreamAIVideoProcessor()
 
 # Global variables for live updates
 live_update_thread = None
@@ -39,6 +44,10 @@ current_refinement_prompt = ""
 # Global queue for transcriptions (in production, use a proper queue system like Redis)
 import queue
 transcription_queue = queue.Queue()
+
+# Global dictionary to track processing jobs
+processing_jobs = {}
+job_counter = 0
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
@@ -351,6 +360,207 @@ def get_listening_status():
                 "error": "Transcription service not available"
             })
             
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Video Processing Endpoints
+
+@app.route('/api/video/presets', methods=['GET'])
+def get_video_presets():
+    """Get available video processing presets"""
+    try:
+        presets = video_processor.get_presets()
+        return jsonify({"success": True, "presets": presets})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/video/process', methods=['POST'])
+def process_video():
+    """Start video processing with specified preset"""
+    global processing_jobs, job_counter
+    
+    try:
+        data = request.get_json() or {}
+        recording_id = data.get('recording_id')
+        preset = data.get('preset', 'balanced')
+        language = data.get('language', 'en')
+        
+        if not recording_id:
+            return jsonify({"error": "No recording ID provided"}), 400
+        
+        # Get the recording
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        success = loop.run_until_complete(stream_app.initialize())
+        if not success:
+            return jsonify({"error": "Failed to initialize application"}), 500
+        
+        recordings = loop.run_until_complete(stream_app.list_sessions())
+        recording = None
+        
+        for rec in recordings:
+            if rec.get('id') == recording_id:
+                recording = rec
+                break
+        
+        if not recording:
+            return jsonify({"error": "Recording not found"}), 404
+        
+        # Get video path
+        video_path = None
+        if recording.get('technical', {}).get('local_recordings'):
+            relative_path = recording['technical']['local_recordings'][0]
+            recordings_dir = Path(__file__).parent / 'recordings'
+            video_path = recordings_dir / relative_path
+            
+            if not video_path.exists():
+                session_name = recording['title']
+                filename = relative_path.split('/')[-1]
+                video_path = recordings_dir / session_name / filename
+            
+            if not video_path.exists() and recording['technical'].get('obs_recordings'):
+                video_path = Path(recording['technical']['obs_recordings'][0])
+        
+        if not video_path or not video_path.exists():
+            return jsonify({"error": "Video file not found"}), 404
+        
+        # Create job ID
+        job_counter += 1
+        job_id = f"job_{job_counter}_{int(time.time())}"
+        
+        # Create output directory
+        output_dir = Path(__file__).parent / 'processed_videos' / f"{recording_id}_{job_id}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize job status
+        processing_jobs[job_id] = {
+            "id": job_id,
+            "recording_id": recording_id,
+            "recording_title": recording.get('title', 'Unknown'),
+            "preset": preset,
+            "language": language,
+            "status": "starting",
+            "progress": 0,
+            "message": "Initializing video processing...",
+            "start_time": time.time(),
+            "video_path": str(video_path),
+            "output_dir": str(output_dir),
+            "result": None,
+            "error": None
+        }
+        
+        # Start processing in a separate thread
+        def process_video_async():
+            try:
+                # Create new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Progress callback
+                def progress_callback(progress, message):
+                    if job_id in processing_jobs:
+                        processing_jobs[job_id]["progress"] = progress
+                        processing_jobs[job_id]["message"] = message
+                        if progress == -1:
+                            processing_jobs[job_id]["status"] = "error"
+                            processing_jobs[job_id]["error"] = message
+                        elif progress == 100:
+                            processing_jobs[job_id]["status"] = "completed"
+                        else:
+                            processing_jobs[job_id]["status"] = "processing"
+                
+                # Process the video
+                result = loop.run_until_complete(
+                    video_processor.process_video(
+                        str(video_path),
+                        preset=preset,
+                        output_dir=str(output_dir),
+                        language=language,
+                        progress_callback=progress_callback
+                    )
+                )
+                
+                if job_id in processing_jobs:
+                    processing_jobs[job_id]["result"] = result
+                    processing_jobs[job_id]["status"] = "completed"
+                    processing_jobs[job_id]["progress"] = 100
+                    processing_jobs[job_id]["message"] = "Video processing completed successfully!"
+                
+            except Exception as e:
+                if job_id in processing_jobs:
+                    processing_jobs[job_id]["status"] = "error"
+                    processing_jobs[job_id]["error"] = str(e)
+                    processing_jobs[job_id]["message"] = f"Processing failed: {str(e)}"
+            finally:
+                loop.close()
+        
+        # Start the processing thread
+        processing_thread = threading.Thread(target=process_video_async)
+        processing_thread.daemon = True
+        processing_thread.start()
+        
+        return jsonify({
+            "success": True,
+            "job_id": job_id,
+            "message": "Video processing started",
+            "status": processing_jobs[job_id]
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        loop.close()
+
+@app.route('/api/video/status/<job_id>', methods=['GET'])
+def get_processing_status(job_id):
+    """Get the status of a video processing job"""
+    try:
+        if job_id not in processing_jobs:
+            return jsonify({"error": "Job not found"}), 404
+        
+        job_status = processing_jobs[job_id].copy()
+        job_status["elapsed_time"] = time.time() - job_status["start_time"]
+        
+        return jsonify({"success": True, "status": job_status})
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/video/download/<job_id>', methods=['GET'])
+def download_processed_video(job_id):
+    """Download the processed video file"""
+    try:
+        if job_id not in processing_jobs:
+            return jsonify({"error": "Job not found"}), 404
+        
+        job = processing_jobs[job_id]
+        
+        if job["status"] != "completed":
+            return jsonify({"error": "Processing not completed"}), 400
+        
+        if not job["result"]:
+            return jsonify({"error": "No result available"}), 400
+        
+        # Get the processed video path
+        edited_video_path = job["result"]["edited_video"]
+        
+        if not os.path.exists(edited_video_path):
+            return jsonify({"error": "Processed video file not found"}), 404
+        
+        # Generate download filename
+        recording_title = job["recording_title"]
+        preset = job["preset"]
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        download_filename = f"{recording_title}_{preset}_edited_{timestamp}.mp4"
+        
+        return send_file(
+            edited_video_path,
+            as_attachment=True,
+            download_name=download_filename,
+            mimetype='video/mp4'
+        )
+        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -127,7 +127,103 @@ const Recordings: React.FC = () => {
   // Load recordings on component mount
   useEffect(() => {
     fetchRecordings();
+    fetchVideoPresets();
   }, []);
+
+  // Fetch available video processing presets
+  const fetchVideoPresets = async () => {
+    try {
+      const response = await fetch('http://localhost:5001/api/video/presets');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setAvailablePresets(data.presets);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch video presets:', error);
+    }
+  };
+
+  // Start video processing
+  const handleGenerateVideo = async (recording: Recording) => {
+    try {
+      const response = await fetch('http://localhost:5001/api/video/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recording_id: recording.id,
+          preset: selectedPreset,
+          language: processingLanguage,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setProcessingJob({
+            id: data.job_id,
+            status: data.status.status,
+            progress: data.status.progress,
+            message: data.status.message,
+            preset: selectedPreset,
+            recording_title: recording.title,
+          });
+          setShowProcessingModal(true);
+          // Start polling for updates
+          pollProcessingStatus(data.job_id);
+        } else {
+          alert('Failed to start video processing: ' + (data.error || 'Unknown error'));
+        }
+      } else {
+        alert('Failed to start video processing');
+      }
+    } catch (error) {
+      console.error('Error starting video processing:', error);
+      alert('Error starting video processing');
+    }
+  };
+
+  // Poll for processing status updates
+  const pollProcessingStatus = async (jobId: string) => {
+    const poll = async () => {
+      try {
+        const response = await fetch(`http://localhost:5001/api/video/status/${jobId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success) {
+            setProcessingJob(prev => prev ? {
+              ...prev,
+              status: data.status.status,
+              progress: data.status.progress,
+              message: data.status.message,
+            } : null);
+
+            // Continue polling if not finished
+            if (data.status.status === 'processing' || data.status.status === 'starting') {
+              setTimeout(poll, 2000); // Poll every 2 seconds
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error polling processing status:', error);
+      }
+    };
+
+    poll();
+  };
+
+  // Download processed video
+  const handleDownloadProcessedVideo = (jobId: string) => {
+    const downloadUrl = `http://localhost:5001/api/video/download/${jobId}`;
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const [selectedRecording, setSelectedRecording] = useState<Recording | null>(null);
   const [filterStatus, setFilterStatus] = useState('all');
@@ -138,6 +234,20 @@ const Recordings: React.FC = () => {
   const [showVideoPlayer, setShowVideoPlayer] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+
+  // Video processing state
+  const [showProcessingModal, setShowProcessingModal] = useState(false);
+  const [processingJob, setProcessingJob] = useState<{
+    id: string;
+    status: string;
+    progress: number;
+    message: string;
+    preset: string;
+    recording_title: string;
+  } | null>(null);
+  const [selectedPreset, setSelectedPreset] = useState('balanced');
+  const [availablePresets, setAvailablePresets] = useState<Record<string, any>>({});
+  const [processingLanguage, setProcessingLanguage] = useState('en');
 
   // Upload form state
   const [uploadForm, setUploadForm] = useState({
@@ -872,7 +982,10 @@ const Recordings: React.FC = () => {
                           <p className="text-gray-400 text-sm">AI creates highlight reels automatically</p>
                         </div>
                       </div>
-                      <button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200">
+                      <button 
+                        onClick={() => handleGenerateVideo(selectedRecording)}
+                        className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                      >
                         Generate
                       </button>
                     </div>
@@ -997,6 +1110,101 @@ const Recordings: React.FC = () => {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Video Processing Modal */}
+      {showProcessingModal && processingJob && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <div className="bg-gray-900/95 backdrop-blur-md border border-white/20 rounded-2xl max-w-md w-full">
+            <div className="p-8">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-2xl font-bold text-white">Processing Video</h3>
+                {processingJob.status === 'completed' && (
+                  <button
+                    onClick={() => setShowProcessingModal(false)}
+                    className="bg-white/10 hover:bg-white/20 border border-white/20 text-white p-2 rounded-lg transition-all duration-200"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-6">
+                {/* Processing Info */}
+                <div className="text-center">
+                  <h4 className="text-white font-medium mb-2">{processingJob.recording_title}</h4>
+                  <p className="text-gray-400 text-sm mb-4">
+                    Using {processingJob.preset} preset
+                  </p>
+                  
+                  {/* Progress Bar */}
+                  <div className="w-full bg-gray-700 rounded-full h-2 mb-4">
+                    <div 
+                      className="bg-gradient-to-r from-purple-600 to-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.max(0, processingJob.progress)}%` }}
+                    ></div>
+                  </div>
+                  
+                  {/* Status */}
+                  <div className="flex items-center justify-center space-x-2 mb-4">
+                    {processingJob.status === 'processing' && (
+                      <div className="animate-spin w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full"></div>
+                    )}
+                    {processingJob.status === 'completed' && (
+                      <div className="w-4 h-4 bg-green-600 rounded-full flex items-center justify-center">
+                        <span className="text-white text-xs">✓</span>
+                      </div>
+                    )}
+                    {processingJob.status === 'error' && (
+                      <div className="w-4 h-4 bg-red-600 rounded-full flex items-center justify-center">
+                        <span className="text-white text-xs">✗</span>
+                      </div>
+                    )}
+                    <span className="text-sm text-gray-400">
+                      {processingJob.status === 'starting' && 'Starting...'}
+                      {processingJob.status === 'processing' && `${processingJob.progress}%`}
+                      {processingJob.status === 'completed' && 'Completed!'}
+                      {processingJob.status === 'error' && 'Error occurred'}
+                    </span>
+                  </div>
+                  
+                  {/* Message */}
+                  <p className="text-gray-300 text-sm mb-6">{processingJob.message}</p>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-center space-x-4">
+                  {processingJob.status === 'completed' && (
+                    <button
+                      onClick={() => handleDownloadProcessedVideo(processingJob.id)}
+                      className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2"
+                    >
+                      <Download className="w-5 h-5" />
+                      <span>Download Edited Video</span>
+                    </button>
+                  )}
+                  
+                  {processingJob.status === 'error' && (
+                    <button
+                      onClick={() => setShowProcessingModal(false)}
+                      className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-medium transition-all duration-200"
+                    >
+                      Close
+                    </button>
+                  )}
+                  
+                  {(processingJob.status === 'processing' || processingJob.status === 'starting') && (
+                    <div className="text-center">
+                      <p className="text-gray-400 text-sm">
+                        Processing in progress... Please wait.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
