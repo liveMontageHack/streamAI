@@ -12,7 +12,6 @@ import {
   Youtube,
   MessageCircle,
   BarChart3,
-  Calendar,
   Zap,
   Radio,
   Pause,
@@ -40,7 +39,7 @@ const Dashboard: React.FC = () => {
   const [newCategoryInput, setNewCategoryInput] = useState('');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
 
-  const [defaultCategories, setDefaultCategories] = useState([
+  const [defaultCategories] = useState([
     'Gaming', 'Just Chatting', 'Music', 'Art', 'Programming', 'Education', 
     'Sports', 'Travel & Outdoors', 'Food & Drink', 'Science & Technology',
     'Politics', 'ASMR', 'Fitness & Health', 'Beauty & Makeup'
@@ -62,8 +61,57 @@ const Dashboard: React.FC = () => {
     setIsStreaming(!isStreaming);
   };
 
-  const handleStartRecord = () => {
-    setIsRecording(!isRecording);
+  const handleStartRecord = async () => {
+    if (!streamTitle.trim()) {
+      alert('Please enter a stream title before starting recording');
+      return;
+    }
+
+    try {
+      if (isRecording) {
+        // Stop recording
+        const response = await fetch('http://localhost:5001/api/recording/stop', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        const result = await response.json();
+        
+        if (result.success) {
+          setIsRecording(false);
+          console.log('Recording stopped successfully');
+        } else {
+          console.error('Failed to stop recording:', result.message);
+          alert('Failed to stop recording: ' + result.message);
+        }
+      } else {
+        // Start recording with stream title as session name
+        const response = await fetch('http://localhost:5001/api/recording/start', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sessionName: streamTitle.trim()
+          }),
+        });
+
+        const result = await response.json();
+        
+        if (result.success) {
+          setIsRecording(true);
+          console.log('Recording started successfully with session:', streamTitle);
+        } else {
+          console.error('Failed to start recording:', result.message);
+          alert('Failed to start recording: ' + result.message);
+        }
+      }
+    } catch (error) {
+      console.error('Error communicating with API:', error);
+      alert('Error: Could not connect to StreamAI API server. Make sure it\'s running on port 5001.');
+    }
   };
 
   const getEnabledPlatforms = () => {

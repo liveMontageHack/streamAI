@@ -91,17 +91,23 @@ class OBSController:
     
     def start_recording(self):
         """Start recording in OBS"""
+        self.logger.debug("Starting recording...")
+        
         if not self.connected:
             self.logger.error("Not connected to OBS")
             return False
         
         try:
+            self.logger.debug("Checking if already recording...")
             # Check if already recording
             status = self.ws.call(requests.GetRecordStatus())
+            self.logger.debug(f"Current record status: {status.datain}")
+            
             if status.datain['outputActive']:
                 self.logger.warning("Recording is already active")
                 return True
             
+            self.logger.debug("Calling StartRecord...")
             # Start recording
             self.ws.call(requests.StartRecord())
             self.recording_active = True
@@ -142,18 +148,24 @@ class OBSController:
     
     def get_recording_status(self):
         """Get current recording status"""
+        self.logger.debug("Getting recording status...")
+        
         if not self.connected:
             self.logger.error("Not connected to OBS")
             return None
         
         try:
+            self.logger.debug("Calling GetRecordStatus...")
             response = self.ws.call(requests.GetRecordStatus())
+            self.logger.debug(f"GetRecordStatus response: {response.datain}")
+            
             status = {
                 'active': response.datain['outputActive'],
                 'paused': response.datain.get('outputPaused', False),
                 'timecode': response.datain.get('outputTimecode', '00:00:00'),
                 'bytes': response.datain.get('outputBytes', 0)
             }
+            self.logger.debug(f"Parsed status: {status}")
             return status
         except Exception as e:
             self.logger.error(f"Failed to get recording status: {e}")

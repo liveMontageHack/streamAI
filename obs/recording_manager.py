@@ -78,27 +78,39 @@ class RecordingManager:
     
     async def start_recording_session(self, session_name=None):
         """Start a complete recording session"""
+        self.logger.debug("Starting recording session...")
+        
         if not self.obs_controller.is_connected():
             self.logger.error("Cannot start recording: OBS not connected")
             return False
         
+        self.logger.debug("OBS is connected, proceeding...")
+        
         # Create session if not exists
         if not self.current_session:
+            self.logger.debug("Creating new session...")
             self.create_session(session_name)
         
+        self.logger.debug("Checking current OBS recording status...")
         # Get current OBS status
         obs_status = self.obs_controller.get_recording_status()
+        self.logger.debug(f"OBS status: {obs_status}")
+        
         if obs_status and obs_status['active']:
             self.logger.warning("OBS recording already active")
             self.current_session['status'] = 'recording'
             return True
         
+        self.logger.debug("Starting OBS recording...")
         # Start OBS recording
         recording_started = self.obs_controller.start_recording()
+        self.logger.debug(f"Recording started result: {recording_started}")
+        
         if recording_started:
             self.current_session['status'] = 'recording'
             self.current_session['obs_start_time'] = datetime.now()
             
+            self.logger.debug("Getting recording folder from OBS...")
             # Get recording folder from OBS
             obs_folder = self.obs_controller.get_recording_folder()
             if obs_folder:
