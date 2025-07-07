@@ -65,15 +65,15 @@ class StreamAILauncher:
         """Installer les dépendances Python"""
         self.print_step("2", "Installation des dépendances Python")
         
-        obs_dir = self.base_dir / "obs"
-        requirements_file = obs_dir / "requirements.txt"
+        # Le script est déjà dans le dossier obs/
+        requirements_file = self.base_dir / "requirements.txt"
         
         if requirements_file.exists():
             print("📦 Installation des dépendances OBS...")
             try:
                 subprocess.run([
                     sys.executable, "-m", "pip", "install", "-r", str(requirements_file)
-                ], check=True, cwd=obs_dir)
+                ], check=True, cwd=self.base_dir)
                 print("✅ Dépendances Python installées")
                 return True
             except subprocess.CalledProcessError as e:
@@ -87,7 +87,8 @@ class StreamAILauncher:
         """Installer les dépendances frontend"""
         self.print_step("3", "Installation des dépendances Frontend")
         
-        frontend_dir = self.base_dir / "frontend"
+        # Le frontend est au niveau parent
+        frontend_dir = self.base_dir.parent / "frontend"
         package_json = frontend_dir / "package.json"
         
         if package_json.exists():
@@ -107,15 +108,15 @@ class StreamAILauncher:
         """Démarrer le serveur intégré"""
         self.print_step("4", "Démarrage du serveur intégré")
         
-        obs_dir = self.base_dir / "obs"
-        start_script = obs_dir / "start_integrated_server.py"
+        # Le script est déjà dans le dossier obs/
+        start_script = self.base_dir / "start_integrated_server.py"
         
         if start_script.exists():
             print("🔧 Démarrage du serveur d'enregistrement intégré...")
             try:
                 process = subprocess.Popen([
                     sys.executable, str(start_script)
-                ], cwd=obs_dir)
+                ], cwd=self.base_dir)
                 
                 self.processes.append(("Serveur Intégré", process))
                 
@@ -145,7 +146,8 @@ class StreamAILauncher:
         """Démarrer le frontend"""
         self.print_step("5", "Démarrage du frontend")
         
-        frontend_dir = self.base_dir / "frontend"
+        # Le frontend est au niveau parent
+        frontend_dir = self.base_dir.parent / "frontend"
         
         if (frontend_dir / "package.json").exists():
             print("🎨 Démarrage du serveur de développement frontend...")

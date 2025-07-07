@@ -1,0 +1,28 @@
+{
+  "name": "test_session_20250708_011500",
+  "path": "recordings/test_session_20250708_011500",
+  "start_time": "2025-07-08T01:15:01.027610",
+  "status": "stopped",
+  "obs_recordings": [
+    "/home/avgilles/Vid\u00e9os/obs/2025-07-08 01-15-01.mkv",
+    "/home/avgilles/Vid\u00e9os/obs/2025-07-08 01-15-40.mkv"
+  ],
+  "metadata": {},
+  "obs_start_time": "2025-07-08T01:15:40.085364",
+  "obs_recording_folder": "/home/avgilles/Vid\u00e9os/obs",
+  "end_time": "2025-07-08T01:16:01.757671",
+  "local_recordings": [
+    "recordings/test_session_20250708_011500/2025-07-08 01-15-01.mkv",
+    "recordings/test_session_20250708_011500/2025-07-08 01-15-40.mkv"
+  ],
+  "additional": {
+    "vultr_upload": {
+      "task_id": "task_6",
+      "upload_time": "2025-07-08T01:16:01.870210",
+      "file_name": "2025-07-08 01-15-40.mkv",
+      "file_size": 585728,
+      "status": "uploaded",
+      "message": "Fichier upload\u00e9 avec succ\u00e8s (mode simple - pas de traitement)"
+    }
+  }
+}

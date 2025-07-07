@@ -1,7 +1,0 @@
-openai-whisper
-numpy
-sounddevice
-requests
-python-dotenv
-groq
-obsws_python

@@ -12,6 +12,7 @@ import json
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from integrated_recording_service import integrated_service
 
 app = Flask(__name__)
@@ -32,6 +33,7 @@ def health_check():
 @app.route('/api/integrated/status', methods=['GET'])
 def get_integrated_status():
     """Get integrated recording service status"""
+    loop = None
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -46,27 +48,33 @@ def get_integrated_status():
         # Get recent recordings
         recent_recordings = integrated_service.get_recent_recordings(limit=5)
         
-        return jsonify({
+        response_data = {
             "service_initialized": True,
             "recording_status": recording_status,
             "recent_recordings": recent_recordings,
             "timestamp": datetime.now().isoformat()
-        })
+        }
+        
+        return jsonify(response_data), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error_response = {"error": str(e), "timestamp": datetime.now().isoformat()}
+        return jsonify(error_response), 500
     finally:
-        loop.close()
+        if loop:
+            loop.close()
 
 @app.route('/api/integrated/recording/start', methods=['POST'])
 def start_integrated_recording():
     """Start integrated recording (OBS + auto upload)"""
+    loop = None
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
         success = loop.run_until_complete(integrated_service.initialize())
         if not success:
-            return jsonify({"error": "Failed to initialize integrated service"}), 500
+            error_response = {"error": "Failed to initialize integrated service", "timestamp": datetime.now().isoformat()}
+            return jsonify(error_response), 500
         
         # Get parameters from request
         data = request.get_json() or {}
@@ -84,11 +92,13 @@ def start_integrated_recording():
             'timestamp': datetime.now().isoformat()
         }, room='recording_updates')
         
-        return jsonify(result)
+        return jsonify(result), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error_response = {"error": str(e), "timestamp": datetime.now().isoformat()}
+        return jsonify(error_response), 500
     finally:
-        loop.close()
+        if loop:
+            loop.close()
 
 @app.route('/api/integrated/recording/stop', methods=['POST'])
 def stop_integrated_recording():
