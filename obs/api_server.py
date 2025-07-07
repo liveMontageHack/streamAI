@@ -30,6 +30,13 @@ stream_app = StreamAIApp()
 live_update_thread = None
 live_update_active = False
 
+# Global variable to store the current refinement prompt
+current_refinement_prompt = ""
+
+# Global queue for transcriptions (in production, use a proper queue system like Redis)
+import queue
+transcription_queue = queue.Queue()
+
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """Get system status"""
@@ -143,10 +150,189 @@ def get_youtube_data():
     finally:
         loop.close()
 
+@app.route('/api/transcription/prompt', methods=['POST'])
+def save_transcription_prompt():
+    """Save transcription refinement prompt"""
+    global current_refinement_prompt
+    try:
+        data = request.get_json() or {}
+        prompt = data.get('prompt', '')
+        
+        # Save the prompt globally (in production, you'd save this to a database)
+        current_refinement_prompt = prompt
+        
+        return jsonify({"success": True, "message": "Refinement prompt saved successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/transcription/prompt', methods=['GET'])
+def get_transcription_prompt():
+    """Get current transcription refinement prompt"""
+    global current_refinement_prompt
+    return jsonify({"prompt": current_refinement_prompt})
+
+@app.route('/api/transcription/refine', methods=['POST'])
+def refine_transcription():
+    """Refine transcription using the saved prompt"""
+    global current_refinement_prompt
+    try:
+        data = request.get_json() or {}
+        raw_text = data.get('raw_text', '')
+        
+        if not raw_text:
+            return jsonify({"error": "No raw text provided"}), 400
+        
+        if not current_refinement_prompt:
+            return jsonify({"error": "No refinement prompt set"}), 400
+        
+        # Import and use the refinement function
+        try:
+            import sys
+            import os
+            # Add the realtime_audio directory to the path
+            realtime_audio_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'realtime_audio')
+            if realtime_audio_path not in sys.path:
+                sys.path.append(realtime_audio_path)
+            
+            from refinement import refine_transcription
+            
+            refined_text = refine_transcription(raw_text, current_refinement_prompt)
+            
+            return jsonify({
+                "success": True,
+                "refined_text": refined_text,
+                "original_text": raw_text,
+                "prompt_used": current_refinement_prompt
+            })
+        except ImportError as e:
+            return jsonify({"error": f"Could not import refinement module: {str(e)}"}), 500
+        except Exception as e:
+            return jsonify({"error": f"Refinement failed: {str(e)}"}), 500
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
+
+@app.route('/api/transcription/poll', methods=['GET'])
+def poll_transcriptions():
+    """Poll for new transcriptions from the queue"""
+    global transcription_queue
+    try:
+        # Try to get a transcription from the queue (non-blocking)
+        try:
+            transcription = transcription_queue.get_nowait()
+            return jsonify({"transcription": transcription, "timestamp": datetime.now().isoformat()})
+        except queue.Empty:
+            return jsonify({"transcription": None})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/transcription/add', methods=['POST'])
+def add_transcription():
+    """Add a new transcription to the queue (for testing or external integration)"""
+    global transcription_queue
+    try:
+        data = request.get_json() or {}
+        transcription = data.get('transcription', '')
+        
+        if not transcription:
+            return jsonify({"error": "No transcription provided"}), 400
+        
+        # Add to queue
+        transcription_queue.put(transcription)
+        
+        return jsonify({"success": True, "message": "Transcription added to queue"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/transcription/listening/start', methods=['POST'])
+def start_listening():
+    """Start real-time audio transcription"""
+    try:
+        # Import the transcription service
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        
+        try:
+            from realtime_audio.realtime_transcription_service import transcription_service
+            
+            if not transcription_service.is_running:
+                # Initialize and start the service
+                if transcription_service.start_service():
+                    result = transcription_service.start_listening()
+                else:
+                    return jsonify({"error": "Failed to start transcription service"}), 500
+            else:
+                result = transcription_service.start_listening()
+            
+            if result:
+                return jsonify({
+                    "success": True, 
+                    "message": "Started listening for audio transcription",
+                    "status": transcription_service.get_listening_status()
+                })
+            else:
+                return jsonify({"error": "Failed to start listening"}), 500
+                
+        except ImportError:
+            return jsonify({"error": "Transcription service not available"}), 500
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/transcription/listening/stop', methods=['POST'])
+def stop_listening():
+    """Stop real-time audio transcription"""
+    try:
+        # Import the transcription service
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        
+        try:
+            from realtime_audio.realtime_transcription_service import transcription_service
+            
+            result = transcription_service.stop_listening()
+            
+            return jsonify({
+                "success": True, 
+                "message": "Stopped listening for audio transcription",
+                "status": transcription_service.get_listening_status()
+            })
+                
+        except ImportError:
+            return jsonify({"error": "Transcription service not available"}), 500
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/transcription/listening/status', methods=['GET'])
+def get_listening_status():
+    """Get current listening status"""
+    try:
+        # Import the transcription service
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        
+        try:
+            from realtime_audio.realtime_transcription_service import transcription_service
+            return jsonify(transcription_service.get_listening_status())
+                
+        except ImportError:
+            return jsonify({
+                "is_running": False,
+                "is_listening": False,
+                "error": "Transcription service not available"
+            })
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # WebSocket event handlers
 @socketio.on('connect')

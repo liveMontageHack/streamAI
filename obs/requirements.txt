@@ -7,3 +7,5 @@ asyncio-mqtt
 flask
 flask-cors
 flask-socketio
+groq
+requests

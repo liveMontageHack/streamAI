@@ -5,6 +5,7 @@ import Settings from './components/Settings';
 import DiscordIntegration from './components/DiscordIntegration';
 import StreamAnalytics from './components/StreamAnalytics';
 import Recordings from './components/Recordings';
+import Transcription from './components/Transcription';
 
 function App() {
   const [activeSection, setActiveSection] = useState('dashboard');
@@ -22,7 +23,7 @@ function App() {
       case 'schedule':
         return <div className="text-white">Schedule section coming soon...</div>;
       case 'transcription':
-        return <div className="text-white">Transcription management coming soon...</div>;
+        return <Transcription />;
       case 'discord':
         return <DiscordIntegration />;
       default:
