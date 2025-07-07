@@ -6,13 +6,16 @@ Flask web server with WebSocket support to provide REST API endpoints
 and real-time communication for the frontend.
 """
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file, abort
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import asyncio
 import json
 import threading
 import time
+import os
+import cv2
+from pathlib import Path
 from datetime import datetime
 from recording_manager import RecordingManager
 from main import StreamAIApp
@@ -105,12 +108,12 @@ def list_recordings():
         
         success = loop.run_until_complete(stream_app.initialize())
         if not success:
-            return jsonify({"error": "Failed to initialize application"}), 500
+            return jsonify({"success": False, "error": "Failed to initialize application"}), 500
             
         recordings = loop.run_until_complete(stream_app.list_sessions())
-        return jsonify({"recordings": recordings})
+        return jsonify({"success": True, "recordings": recordings})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"success": False, "error": str(e)}), 500
     finally:
         loop.close()
 
@@ -238,12 +241,25 @@ def add_transcription():
     try:
         data = request.get_json() or {}
         transcription = data.get('transcription', '')
+        message_type = data.get('type', 'raw')  # 'raw' or 'refined'
+        original = data.get('original', '')
         
         if not transcription:
             return jsonify({"error": "No transcription provided"}), 400
         
+        # Create a structured message for the frontend
+        message = {
+            "id": str(datetime.now().timestamp()),
+            "type": message_type,
+            "content": transcription,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        if message_type == 'refined' and original:
+            message["original"] = original
+        
         # Add to queue
-        transcription_queue.put(transcription)
+        transcription_queue.put(message)
         
         return jsonify({"success": True, "message": "Transcription added to queue"})
     except Exception as e:
@@ -334,107 +350,201 @@ def get_listening_status():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# WebSocket event handlers
-@socketio.on('connect')
-def handle_connect():
-    """Handle client connection"""
-    print(f"Client connected: {request.sid}")
-    emit('status', {'message': 'Connected to StreamAI server', 'timestamp': datetime.now().isoformat()})
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    """Handle client disconnection"""
-    print(f"Client disconnected: {request.sid}")
-
-@socketio.on('join_live_updates')
-def handle_join_live_updates():
-    """Join live updates room"""
-    join_room('live_updates')
-    print(f"Client {request.sid} joined live updates")
-    emit('joined', {'room': 'live_updates'})
-    
-    # Start live updates if not already running
-    global live_update_active, live_update_thread
-    if not live_update_active:
-        live_update_active = True
-        live_update_thread = threading.Thread(target=send_live_updates)
-        live_update_thread.daemon = True
-        live_update_thread.start()
-
-@socketio.on('leave_live_updates')
-def handle_leave_live_updates():
-    """Leave live updates room"""
-    leave_room('live_updates')
-    print(f"Client {request.sid} left live updates")
-    emit('left', {'room': 'live_updates'})
-
-@socketio.on('join_transcription')
-def handle_join_transcription():
-    """Join transcription room"""
-    join_room('transcription')
-    print(f"Client {request.sid} joined transcription")
-    emit('joined', {'room': 'transcription'})
-
-@socketio.on('leave_transcription')
-def handle_leave_transcription():
-    """Leave transcription room"""
-    leave_room('transcription')
-    print(f"Client {request.sid} left transcription")
-    emit('left', {'room': 'transcription'})
-
-@socketio.on('transcription_message')
-def handle_transcription_message(data):
-    """Handle incoming transcription message"""
-    print(f"Received transcription message: {data}")
-    # Broadcast to all clients in transcription room
-    socketio.emit('transcription_update', {
-        'message': data.get('message', ''),
-        'user': data.get('user', 'Unknown'),
-        'timestamp': datetime.now().isoformat()
-    }, room='transcription')
-
-def send_live_updates():
-    """Send live updates to connected clients"""
-    global live_update_active
-    
-    while live_update_active:
-        try:
-            # Get current system status
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            success = loop.run_until_complete(stream_app.initialize())
-            if success:
-                # Get OBS data
-                obs_data = loop.run_until_complete(stream_app.get_obs_data())
-                
-                # Send live update
-                socketio.emit('live_update', {
-                    'timestamp': datetime.now().isoformat(),
-                    'obs_data': obs_data,
-                    'recording_status': obs_data.get('recording_status', {}),
-                    'stream_status': obs_data.get('stream_status', {})
-                }, room='live_updates')
-            
-            loop.close()
-            
-        except Exception as e:
-            print(f"Error in live updates: {e}")
-            socketio.emit('error', {
-                'message': f'Live update error: {str(e)}',
-                'timestamp': datetime.now().isoformat()
-            }, room='live_updates')
+@app.route('/api/recordings/<recording_id>/video', methods=['GET'])
+def serve_recording_video(recording_id):
+    """Serve the video file for a specific recording"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-        # Wait 5 seconds before next update
-        time.sleep(5)
+        success = loop.run_until_complete(stream_app.initialize())
+        if not success:
+            return jsonify({"error": "Failed to initialize application"}), 500
+        
+        # Get all recordings to find the one with the matching ID
+        recordings = loop.run_until_complete(stream_app.list_sessions())
+        recording = None
+        
+        for rec in recordings:
+            if rec.get('id') == recording_id:
+                recording = rec
+                break
+        
+        if not recording:
+            abort(404)
+        
+        # Get the video file path from technical metadata
+        video_path = None
+        if recording.get('technical', {}).get('local_recordings'):
+            # Use the first video file
+            relative_path = recording['technical']['local_recordings'][0]
+            # Convert to absolute path
+            recordings_dir = Path(__file__).parent / 'recordings'
+            video_path = recordings_dir / relative_path
+            
+            # If the relative path doesn't work, try building the path differently
+            if not video_path.exists():
+                # Try: recordings_dir / session_name / filename
+                session_name = recording['title']
+                filename = relative_path.split('/')[-1]  # Get just the filename
+                video_path = recordings_dir / session_name / filename
+            
+            # If the relative path doesn't work, try the absolute path from obs_recordings
+            if not video_path.exists() and recording['technical'].get('obs_recordings'):
+                video_path = Path(recording['technical']['obs_recordings'][0])
+        
+        if not video_path or not video_path.exists():
+            abort(404)
+        
+        return send_file(str(video_path), as_attachment=False, mimetype='video/mp4')
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        loop.close()
+
+@app.route('/api/recordings/<recording_id>/thumbnail', methods=['GET'])
+def serve_recording_thumbnail(recording_id):
+    """Generate and serve a thumbnail (first frame) for a specific recording"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        success = loop.run_until_complete(stream_app.initialize())
+        if not success:
+            return jsonify({"error": "Failed to initialize application"}), 500
+        
+        # Get all recordings to find the one with the matching ID
+        recordings = loop.run_until_complete(stream_app.list_sessions())
+        recording = None
+        
+        for rec in recordings:
+            if rec.get('id') == recording_id:
+                recording = rec
+                break
+        
+        if not recording:
+            abort(404)
+        
+        # Get the video file path
+        video_path = None
+        if recording.get('technical', {}).get('local_recordings'):
+            relative_path = recording['technical']['local_recordings'][0]
+            recordings_dir = Path(__file__).parent / 'recordings'
+            video_path = recordings_dir / relative_path
+            
+            # If the relative path doesn't work, try building the path differently
+            if not video_path.exists():
+                # Try: recordings_dir / session_name / filename
+                session_name = recording['title']
+                filename = relative_path.split('/')[-1]  # Get just the filename
+                video_path = recordings_dir / session_name / filename
+            
+            # Last resort: try obs_recordings path if available
+            if not video_path.exists() and recording['technical'].get('obs_recordings'):
+                video_path = Path(recording['technical']['obs_recordings'][0])
+        
+        if not video_path or not video_path.exists():
+            abort(404)
+        
+        # Generate thumbnail path
+        thumbnail_dir = video_path.parent / 'thumbnails'
+        thumbnail_dir.mkdir(exist_ok=True)
+        thumbnail_path = thumbnail_dir / f"{video_path.stem}_thumbnail.jpg"
+        
+        # Generate thumbnail if it doesn't exist
+        if not thumbnail_path.exists():
+            try:
+                # Use OpenCV to extract first frame
+                cap = cv2.VideoCapture(str(video_path))
+                ret, frame = cap.read()
+                cap.release()
+                
+                if ret:
+                    # Resize frame to a reasonable thumbnail size
+                    height, width = frame.shape[:2]
+                    aspect_ratio = width / height
+                    thumbnail_width = 320
+                    thumbnail_height = int(thumbnail_width / aspect_ratio)
+                    
+                    resized_frame = cv2.resize(frame, (thumbnail_width, thumbnail_height))
+                    cv2.imwrite(str(thumbnail_path), resized_frame)
+                else:
+                    abort(404)  # Could not extract frame
+                    
+            except Exception as e:
+                print(f"Error generating thumbnail: {e}")
+                abort(500)
+        
+        return send_file(str(thumbnail_path), mimetype='image/jpeg')
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        loop.close()
+
+@app.route('/api/recordings/<recording_id>/download', methods=['GET'])
+def download_recording_video(recording_id):
+    """Download the video file for a specific recording"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        success = loop.run_until_complete(stream_app.initialize())
+        if not success:
+            return jsonify({"error": "Failed to initialize application"}), 500
+        
+        # Get all recordings to find the one with the matching ID
+        recordings = loop.run_until_complete(stream_app.list_sessions())
+        recording = None
+        
+        for rec in recordings:
+            if rec.get('id') == recording_id:
+                recording = rec
+                break
+        
+        if not recording:
+            abort(404)
+        
+        # Get the video file path from technical metadata
+        video_path = None
+        if recording.get('technical', {}).get('local_recordings'):
+            # Use the first video file
+            relative_path = recording['technical']['local_recordings'][0]
+            # Convert to absolute path
+            recordings_dir = Path(__file__).parent / 'recordings'
+            video_path = recordings_dir / relative_path
+            
+            # If the relative path doesn't work, try building the path differently
+            if not video_path.exists():
+                # Try: recordings_dir / session_name / filename
+                session_name = recording['title']
+                filename = relative_path.split('/')[-1]  # Get just the filename
+                video_path = recordings_dir / session_name / filename
+            
+            # If the relative path doesn't work, try the absolute path from obs_recordings
+            if not video_path.exists() and recording['technical'].get('obs_recordings'):
+                video_path = Path(recording['technical']['obs_recordings'][0])
+        
+        if not video_path or not video_path.exists():
+            abort(404)
+        
+        # Generate a clean filename for download
+        session_name = recording.get('title', 'recording')
+        timestamp = recording.get('timestamp', '').replace(':', '-').replace(' ', '_')
+        download_filename = f"{session_name}_{timestamp}.{video_path.suffix[1:]}"
+        
+        return send_file(
+            str(video_path), 
+            as_attachment=True, 
+            download_name=download_filename,
+            mimetype='video/mp4'
+        )
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        loop.close()
 
 if __name__ == '__main__':
-    print("Starting StreamAI API Server with WebSocket support...")
-    print("API will be available at: http://localhost:5001")
-    print("WebSocket will be available at: ws://localhost:5001")
-    
-    # Stop live updates when server shuts down
-    try:
-        socketio.run(app, debug=True, host='0.0.0.0', port=5001)
-    finally:
-        live_update_active = False
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)

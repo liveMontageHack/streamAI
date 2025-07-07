@@ -116,6 +116,9 @@ class RecordingManager:
             if obs_folder:
                 self.current_session['obs_recording_folder'] = obs_folder
             
+            # Save initial metadata
+            self.save_session_metadata({'status': 'Recording in progress'})
+            
             self.logger.info(f"Recording session started: {self.current_session['name']}")
             return True
         else:
@@ -137,6 +140,10 @@ class RecordingManager:
             if self.current_session:
                 self.current_session['status'] = 'stopped'
                 self.current_session['end_time'] = datetime.now()
+                
+                # Save metadata even if no recording was active
+                self.save_session_metadata()
+                
                 self.logger.info(f"Session marked as stopped: {self.current_session['name']}")
                 return True
             else:
@@ -151,12 +158,15 @@ class RecordingManager:
                 self.current_session['status'] = 'stopped'
                 self.current_session['end_time'] = datetime.now()
                 
-                # If result contains file path, save it
-                if isinstance(result, str) and result != True:
-                    self.current_session['obs_recordings'].append(result)
-                    
-                    # Copy recording to session folder
-                    await self._copy_recording_to_session(result)
+                # Wait a moment for OBS to finish writing the file
+                import time
+                time.sleep(1)
+                
+                # Find and copy the latest recording from OBS folder
+                await self._find_and_copy_latest_recording()
+                
+                # Save metadata with all session information
+                self.save_session_metadata()
                 
                 self.logger.info(f"Recording session stopped: {self.current_session['name']}")
             else:
@@ -166,6 +176,61 @@ class RecordingManager:
         else:
             self.logger.error("Failed to stop OBS recording")
             return False
+    
+    async def _find_and_copy_latest_recording(self):
+        """Find the latest recording in OBS folder and copy it to session folder"""
+        try:
+            # Get OBS recording folder
+            obs_folder = self.current_session.get('obs_recording_folder')
+            if not obs_folder:
+                obs_folder = self.obs_controller.get_recording_folder()
+            
+            if not obs_folder:
+                self.logger.error("No OBS recording folder found")
+                return
+            
+            obs_path = Path(obs_folder)
+            if not obs_path.exists():
+                self.logger.error(f"OBS recording folder does not exist: {obs_folder}")
+                return
+            
+            # Find the latest video file
+            video_extensions = ['.mkv', '.mp4', '.avi', '.mov', '.flv']
+            video_files = []
+            
+            for ext in video_extensions:
+                video_files.extend(obs_path.glob(f'*{ext}'))
+            
+            if not video_files:
+                self.logger.warning("No video files found in OBS recording folder")
+                return
+            
+            # Get the latest file (by modification time)
+            latest_file = max(video_files, key=lambda x: x.stat().st_mtime)
+            
+            # Check if this file was created after we started recording
+            if self.current_session.get('obs_start_time'):
+                file_time = datetime.fromtimestamp(latest_file.stat().st_mtime)
+                start_time = self.current_session['obs_start_time']
+                
+                if file_time < start_time:
+                    self.logger.warning("Latest file is older than recording start time")
+                    return
+            
+            # Copy to session folder
+            dest_path = self.current_session['path'] / latest_file.name
+            shutil.copy2(latest_file, dest_path)
+            self.logger.info(f"Copied recording to session folder: {dest_path}")
+            
+            # Update session metadata
+            self.current_session['obs_recordings'] = self.current_session.get('obs_recordings', [])
+            self.current_session['obs_recordings'].append(str(latest_file))
+            
+            self.current_session['local_recordings'] = self.current_session.get('local_recordings', [])
+            self.current_session['local_recordings'].append(str(dest_path.relative_to(self.recordings_path)))
+            
+        except Exception as e:
+            self.logger.error(f"Failed to find and copy latest recording: {e}")
     
     async def _copy_recording_to_session(self, obs_recording_path):
         """Copy OBS recording to session folder"""
@@ -199,21 +264,78 @@ class RecordingManager:
         return session_info
     
     def list_sessions(self):
-        """List all recording sessions"""
+        """List all recording sessions with frontend-compatible metadata"""
         sessions = []
         if self.recordings_path.exists():
             for session_dir in self.recordings_path.iterdir():
                 if session_dir.is_dir():
+                    # Try to load existing metadata first
+                    metadata = self.load_session_metadata(session_dir)
+                    
+                    if metadata:
+                        # Use existing metadata if it follows frontend format
+                        if all(key in metadata for key in ['id', 'title', 'date', 'duration', 'size']):
+                            sessions.append(metadata)
+                            continue
+                    
+                    # Generate basic session info for backwards compatibility
+                    video_files = [f for f in session_dir.iterdir() if f.is_file() and f.suffix.lower() in ['.mkv', '.mp4', '.avi', '.mov']]
+                    
+                    # Calculate total size
+                    total_size = sum(f.stat().st_size for f in session_dir.iterdir() if f.is_file())
+                    if total_size >= 1024**3:  # GB
+                        size_str = f"{total_size / (1024**3):.1f} GB"
+                    elif total_size >= 1024**2:  # MB
+                        size_str = f"{total_size / (1024**2):.1f} MB"
+                    else:  # Bytes/KB
+                        size_str = f"{total_size / 1024:.1f} KB"
+                    
+                    # Create relative paths for video files
+                    local_recordings = [str(session_dir.name + '/' + f.name) for f in video_files]
+                    
                     session_info = {
-                        'name': session_dir.name,
-                        'path': str(session_dir),
-                        'created': datetime.fromtimestamp(session_dir.stat().st_ctime),
-                        'files': [f.name for f in session_dir.iterdir() if f.is_file()]
+                        'id': str(hash(session_dir.name)),
+                        'title': session_dir.name,
+                        'date': datetime.fromtimestamp(session_dir.stat().st_ctime).strftime('%Y-%m-%d'),
+                        'duration': '0:00:00',  # Unknown for old sessions
+                        'size': size_str,
+                        'views': 0,
+                        'thumbnail': '',
+                        'platforms': ['Local Recording'],
+                        'status': 'ready',
+                        'hasTranscription': False,
+                        'hasHighlights': False,
+                        'hasShorts': False,
+                        'categories': ['General'],
+                        'isManualUpload': False,
+                        'technical': {
+                            'session_path': str(session_dir),
+                            'local_recordings': local_recordings,
+                            'files': [f.name for f in session_dir.iterdir() if f.is_file()],
+                            'file_size_bytes': total_size
+                        }
                     }
                     sessions.append(session_info)
         
-        sessions.sort(key=lambda x: x['created'], reverse=True)
+        # Sort by date (newest first)
+        sessions.sort(key=lambda x: x['date'], reverse=True)
         return sessions
+    
+    def load_session_metadata(self, session_path):
+        """Load session metadata from session_metadata.json file"""
+        try:
+            import json
+            metadata_file = Path(session_path) / 'session_metadata.json'
+            
+            if metadata_file.exists():
+                with open(metadata_file, 'r') as f:
+                    return json.load(f)
+            else:
+                self.logger.debug(f"No metadata file found at: {metadata_file}")
+                return None
+        except Exception as e:
+            self.logger.error(f"Failed to load session metadata from {session_path}: {e}")
+            return None
     
     def get_obs_data(self):
         """Get current OBS data (video and audio)"""
@@ -272,30 +394,138 @@ class RecordingManager:
         self.logger.info("Recording Manager cleanup completed")
     
     def save_session_metadata(self, additional_metadata=None):
-        """Save session metadata to file"""
+        """Save session metadata to file in format matching frontend Recording interface"""
         if not self.current_session:
             self.logger.warning("No current session to save metadata for")
             return False
         
         try:
             import json
+            import os
             
-            metadata = self.current_session.copy()
+            # Calculate session duration
+            duration = "0:00:00"
+            if self.current_session.get('end_time') and self.current_session.get('start_time'):
+                duration_seconds = (self.current_session['end_time'] - self.current_session['start_time']).total_seconds()
+                hours = int(duration_seconds // 3600)
+                minutes = int((duration_seconds % 3600) // 60)
+                seconds = int(duration_seconds % 60)
+                duration = f"{hours}:{minutes:02d}:{seconds:02d}"
+            elif self.current_session.get('obs_start_time'):
+                # If recording is still active, calculate from start time to now
+                duration_seconds = (datetime.now() - self.current_session['obs_start_time']).total_seconds()
+                hours = int(duration_seconds // 3600)
+                minutes = int((duration_seconds % 3600) // 60)
+                seconds = int(duration_seconds % 60)
+                duration = f"{hours}:{minutes:02d}:{seconds:02d}"
             
-            # Convert datetime objects to strings for JSON serialization
-            for key, value in metadata.items():
-                if isinstance(value, datetime):
-                    metadata[key] = value.isoformat()
+            # Calculate file size
+            total_size = 0
+            size_str = "0 MB"
+            if self.current_session.get('local_recordings'):
+                for recording_path in self.current_session['local_recordings']:
+                    full_path = self.recordings_path / recording_path
+                    if full_path.exists():
+                        total_size += full_path.stat().st_size
+                
+                if total_size > 0:
+                    if total_size >= 1024**3:  # GB
+                        size_str = f"{total_size / (1024**3):.1f} GB"
+                    else:  # MB
+                        size_str = f"{total_size / (1024**2):.1f} MB"
             
+            # Determine recording status for frontend
+            frontend_status = "processing"
+            if self.current_session.get('status') == 'stopped':
+                frontend_status = "ready"
+            elif self.current_session.get('status') == 'recording':
+                frontend_status = "processing"
+            
+            # Detect platforms based on OBS setup or session data
+            platforms = []
+            if self.obs_controller.is_connected():
+                stream_status = self.obs_controller.get_stream_status()
+                if stream_status and stream_status.get('active'):
+                    platforms.append('OBS Stream')
+                else:
+                    platforms.append('OBS Recording')
+            
+            # Add any additional platforms from metadata
+            if additional_metadata and 'platforms' in additional_metadata:
+                platforms.extend(additional_metadata['platforms'])
+            
+            if not platforms:
+                platforms = ['Local Recording']
+            
+            # Generate categories based on session name and metadata
+            categories = []
+            session_name_lower = self.current_session['name'].lower()
+            
+            # Auto-detect categories from session name
+            if 'gaming' in session_name_lower or 'game' in session_name_lower:
+                categories.append('Gaming')
+            if 'tutorial' in session_name_lower or 'education' in session_name_lower:
+                categories.append('Education')
+            if 'chat' in session_name_lower or 'discussion' in session_name_lower:
+                categories.append('Just Chatting')
+            if 'programming' in session_name_lower or 'coding' in session_name_lower:
+                categories.append('Programming')
+            if 'music' in session_name_lower:
+                categories.append('Music')
+            
+            # Add categories from additional metadata
+            if additional_metadata and 'categories' in additional_metadata:
+                categories.extend(additional_metadata['categories'])
+            
+            # Default category if none detected
+            if not categories:
+                categories = ['General']
+            
+            # Remove duplicates
+            categories = list(set(categories))
+            
+            # Create metadata in frontend Recording format
+            frontend_metadata = {
+                # Core Recording interface fields
+                "id": str(hash(self.current_session['name'])),  # Generate consistent ID
+                "title": self.current_session['name'],
+                "date": self.current_session['start_time'].strftime('%Y-%m-%d'),
+                "duration": duration,
+                "size": size_str,
+                "views": 0,  # Initial views count
+                "thumbnail": additional_metadata.get('thumbnail', '') if additional_metadata else '',
+                "platforms": platforms,
+                "status": frontend_status,
+                "hasTranscription": False,  # Will be updated when transcription is generated
+                "hasHighlights": False,     # Will be updated when highlights are generated
+                "hasShorts": False,         # Will be updated when shorts are generated
+                "categories": categories,
+                "isManualUpload": False,    # This is an OBS recording, not manual upload
+                
+                # Additional technical metadata for backend use
+                "technical": {
+                    "session_path": str(self.current_session['path']),
+                    "start_time_iso": self.current_session['start_time'].isoformat(),
+                    "end_time_iso": self.current_session.get('end_time').isoformat() if self.current_session.get('end_time') else None,
+                    "obs_recording_folder": self.current_session.get('obs_recording_folder'),
+                    "obs_recordings": self.current_session.get('obs_recordings', []),
+                    "local_recordings": self.current_session.get('local_recordings', []),
+                    "file_size_bytes": total_size
+                }
+            }
+            
+            # Add any additional metadata
             if additional_metadata:
-                metadata['additional'] = additional_metadata
+                frontend_metadata["additional"] = additional_metadata
             
+            # Save to session_metadata.json
             metadata_file = self.current_session['path'] / 'session_metadata.json'
             with open(metadata_file, 'w') as f:
-                json.dump(metadata, f, indent=2, default=str)
+                json.dump(frontend_metadata, f, indent=2, default=str)
             
             self.logger.info(f"Session metadata saved to: {metadata_file}")
             return True
+            
         except Exception as e:
             self.logger.error(f"Failed to save session metadata: {e}")
             return False
