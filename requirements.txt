@@ -1,0 +1,41 @@
+# Core Flask dependencies
+Flask==2.3.3
+Flask-CORS==4.0.0
+Flask-SocketIO==5.3.6
+
+# WebSocket and async support
+python-socketio==5.8.0
+python-engineio==4.7.1
+eventlet==0.33.3
+
+# OBS WebSocket
+obsws-python==1.6.0
+
+# HTTP requests
+requests==2.31.0
+
+# YouTube API
+google-api-python-client==2.100.0
+google-auth-httplib2==0.1.1
+google-auth-oauthlib==1.1.0
+
+# Video processing
+opencv-python-headless==4.8.1.78
+moviepy==1.0.3
+
+# Audio processing
+pyaudio==0.2.11
+speech-recognition==3.10.0
+pydub==0.25.1
+
+# AI/ML
+openai==0.28.1
+groq==0.4.1
+
+# Utilities
+python-dotenv==1.0.0
+pathlib2==2.3.7
+Pillow==10.0.1
+
+# Production server
+gunicorn==21.2.0
