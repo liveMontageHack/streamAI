@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Video, 
   Play, 
@@ -47,72 +47,183 @@ interface Recording {
   hasShorts: boolean;
   categories: string[];
   isManualUpload?: boolean;
+  // Additional fields for video handling
+  videoPath?: string;
+  technical?: {
+    session_path: string;
+    local_recordings: string[];
+    file_size_bytes: number;
+  };
 }
 
 const Recordings: React.FC = () => {
-  const [recordings, setRecordings] = useState<Recording[]>([
-    {
-      id: '1',
-      title: 'Epic Gaming Session - New Game Release',
-      date: '2024-01-15',
-      duration: '2:34:12',
-      size: '4.2 GB',
-      views: 1247,
-      thumbnail: 'https://images.pexels.com/photos/442576/pexels-photo-442576.jpeg?auto=compress&cs=tinysrgb&w=400',
-      platforms: ['Twitch', 'YouTube'],
-      status: 'ready',
-      hasTranscription: true,
-      hasHighlights: true,
-      hasShorts: true,
-      categories: ['Gaming', 'Entertainment']
-    },
-    {
-      id: '2',
-      title: 'Community Q&A and Discussion',
-      date: '2024-01-14',
-      duration: '1:45:30',
-      size: '2.8 GB',
-      views: 892,
-      thumbnail: 'https://images.pexels.com/photos/1181673/pexels-photo-1181673.jpeg?auto=compress&cs=tinysrgb&w=400',
-      platforms: ['Discord', 'YouTube'],
-      status: 'processing',
-      hasTranscription: true,
-      hasHighlights: false,
-      hasShorts: false,
-      categories: ['Just Chatting', 'Community']
-    },
-    {
-      id: '3',
-      title: 'Tutorial: Advanced Streaming Setup',
-      date: '2024-01-13',
-      duration: '3:12:45',
-      size: '5.1 GB',
-      views: 2156,
-      thumbnail: 'https://images.pexels.com/photos/1181677/pexels-photo-1181677.jpeg?auto=compress&cs=tinysrgb&w=400',
-      platforms: ['Twitch', 'YouTube', 'Discord'],
-      status: 'ready',
-      hasTranscription: true,
-      hasHighlights: true,
-      hasShorts: true,
-      categories: ['Education', 'Technology']
-    },
-    {
-      id: '4',
-      title: 'Late Night Coding Stream',
-      date: '2024-01-12',
-      duration: '4:20:15',
-      size: '6.8 GB',
-      views: 567,
-      thumbnail: 'https://images.pexels.com/photos/1181244/pexels-photo-1181244.jpeg?auto=compress&cs=tinysrgb&w=400',
-      platforms: ['Twitch'],
-      status: 'editing',
-      hasTranscription: true,
-      hasHighlights: false,
-      hasShorts: false,
-      categories: ['Programming', 'Education'],
-      isManualUpload: true
+  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch recordings from API
+  const fetchRecordings = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await fetch('http://localhost:5001/api/recordings');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success && Array.isArray(data.recordings)) {
+        // Map the backend data to frontend Recording format
+        const mappedRecordings: Recording[] = data.recordings.map((recording: any) => {
+          // Generate video thumbnail from first frame if video exists
+          let thumbnail = recording.thumbnail || '';
+          let videoPath = '';
+          
+          if (recording.technical?.local_recordings && recording.technical.local_recordings.length > 0) {
+            // Use the first video file as the main video
+            videoPath = recording.technical.local_recordings[0];
+            // Generate thumbnail URL for video (backend should serve these)
+            if (!thumbnail) {
+              thumbnail = `http://localhost:5001/api/recordings/${recording.id}/thumbnail`;
+            }
+          }
+          
+          return {
+            id: recording.id || recording.title || Date.now().toString(),
+            title: recording.title || 'Untitled Recording',
+            date: recording.date || new Date().toISOString().split('T')[0],
+            duration: recording.duration || '0:00:00',
+            size: recording.size || '0 MB',
+            views: recording.views || 0,
+            thumbnail: thumbnail || '/api/placeholder-thumbnail.jpg',
+            platforms: recording.platforms || ['Local Recording'],
+            status: recording.status || 'ready',
+            hasTranscription: recording.hasTranscription || false,
+            hasHighlights: recording.hasHighlights || false,
+            hasShorts: recording.hasShorts || false,
+            categories: recording.categories || ['General'],
+            isManualUpload: recording.isManualUpload || false,
+            videoPath: videoPath,
+            technical: recording.technical
+          };
+        });
+        
+        setRecordings(mappedRecordings);
+      } else {
+        console.warn('Invalid response format:', data);
+        setRecordings([]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch recordings:', error);
+      setError(error instanceof Error ? error.message : 'Failed to load recordings');
+      setRecordings([]);
+    } finally {
+      setLoading(false);
     }
-  ]);
+  };
+
+  // Load recordings on component mount
+  useEffect(() => {
+    fetchRecordings();
+    fetchVideoPresets();
+  }, []);
+
+  // Fetch available video processing presets
+  const fetchVideoPresets = async () => {
+    try {
+      const response = await fetch('http://localhost:5001/api/video/presets');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setAvailablePresets(data.presets);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch video presets:', error);
+    }
+  };
+
+  // Start video processing
+  const handleGenerateVideo = async (recording: Recording) => {
+    try {
+      const response = await fetch('http://localhost:5001/api/video/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recording_id: recording.id,
+          preset: selectedPreset,
+          language: processingLanguage,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setProcessingJob({
+            id: data.job_id,
+            status: data.status.status,
+            progress: data.status.progress,
+            message: data.status.message,
+            preset: selectedPreset,
+            recording_title: recording.title,
+          });
+          setShowProcessingModal(true);
+          // Start polling for updates
+          pollProcessingStatus(data.job_id);
+        } else {
+          alert('Failed to start video processing: ' + (data.error || 'Unknown error'));
+        }
+      } else {
+        alert('Failed to start video processing');
+      }
+    } catch (error) {
+      console.error('Error starting video processing:', error);
+      alert('Error starting video processing');
+    }
+  };
+
+  // Poll for processing status updates
+  const pollProcessingStatus = async (jobId: string) => {
+    const poll = async () => {
+      try {
+        const response = await fetch(`http://localhost:5001/api/video/status/${jobId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success) {
+            setProcessingJob(prev => prev ? {
+              ...prev,
+              status: data.status.status,
+              progress: data.status.progress,
+              message: data.status.message,
+            } : null);
+
+            // Continue polling if not finished
+            if (data.status.status === 'processing' || data.status.status === 'starting') {
+              setTimeout(poll, 2000); // Poll every 2 seconds
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error polling processing status:', error);
+      }
+    };
+
+    poll();
+  };
+
+  // Download processed video
+  const handleDownloadProcessedVideo = (jobId: string) => {
+    const downloadUrl = `http://localhost:5001/api/video/download/${jobId}`;
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const [selectedRecording, setSelectedRecording] = useState<Recording | null>(null);
   const [filterStatus, setFilterStatus] = useState('all');
@@ -123,6 +234,20 @@ const Recordings: React.FC = () => {
   const [showVideoPlayer, setShowVideoPlayer] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+
+  // Video processing state
+  const [showProcessingModal, setShowProcessingModal] = useState(false);
+  const [processingJob, setProcessingJob] = useState<{
+    id: string;
+    status: string;
+    progress: number;
+    message: string;
+    preset: string;
+    recording_title: string;
+  } | null>(null);
+  const [selectedPreset, setSelectedPreset] = useState('balanced');
+  const [availablePresets, setAvailablePresets] = useState<Record<string, any>>({});
+  const [processingLanguage, setProcessingLanguage] = useState('en');
 
   // Upload form state
   const [uploadForm, setUploadForm] = useState({
@@ -226,6 +351,20 @@ const Recordings: React.FC = () => {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Handle video download
+  const handleDownload = (recording: Recording) => {
+    if (recording.id) {
+      const downloadUrl = `http://localhost:5001/api/recordings/${recording.id}/download`;
+      // Create a temporary link to trigger the download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `${recording.title}_${recording.date}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
@@ -316,7 +455,38 @@ const Recordings: React.FC = () => {
         </div>
       )}
 
+      {/* Loading State */}
+      {loading && (
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-12 text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-purple-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <h3 className="text-xl font-semibold text-white mb-2">Loading recordings...</h3>
+          <p className="text-gray-400">Fetching your recorded sessions</p>
+        </div>
+      )}
+
+      {/* Error State */}
+      {error && !loading && (
+        <div className="bg-red-900/20 border border-red-600/20 rounded-2xl p-6 mb-6">
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center">
+              <X className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <h3 className="text-red-400 font-medium">Failed to load recordings</h3>
+              <p className="text-red-300 text-sm mt-1">{error}</p>
+            </div>
+            <button
+              onClick={fetchRecordings}
+              className="ml-auto bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm transition-all duration-200"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Recordings Grid */}
+      {!loading && !error && (
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
         {filteredRecordings.map((recording) => (
           <div key={recording.id} className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl overflow-hidden hover:bg-white/15 transition-all duration-200">
@@ -410,7 +580,10 @@ const Recordings: React.FC = () => {
                   <span>Edit</span>
                 </button>
                 <div className="flex items-center space-x-2">
-                  <button className="bg-white/10 hover:bg-white/20 border border-white/20 text-white p-2 rounded-lg transition-all duration-200">
+                  <button 
+                    onClick={() => handleDownload(recording)}
+                    className="bg-white/10 hover:bg-white/20 border border-white/20 text-white p-2 rounded-lg transition-all duration-200"
+                  >
                     <Download className="w-4 h-4" />
                   </button>
                   <button className="bg-white/10 hover:bg-white/20 border border-white/20 text-white p-2 rounded-lg transition-all duration-200">
@@ -425,6 +598,7 @@ const Recordings: React.FC = () => {
           </div>
         ))}
       </div>
+      )}
 
       {/* Upload Modal */}
       {showUploadModal && (
@@ -568,19 +742,33 @@ const Recordings: React.FC = () => {
 
               {/* Video Player */}
               <div className="relative bg-black rounded-xl overflow-hidden mb-6">
-                <img 
-                  src={selectedRecording.thumbnail} 
-                  alt={selectedRecording.title}
-                  className="w-full h-96 object-cover"
-                />
-                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                  <button
-                    onClick={() => setIsPlaying(!isPlaying)}
-                    className="bg-white/20 backdrop-blur-md border border-white/30 text-white p-4 rounded-full hover:bg-white/30 transition-all duration-200"
+                {selectedRecording.videoPath ? (
+                  <video
+                    className="w-full h-96 object-cover"
+                    controls
+                    poster={selectedRecording.thumbnail}
+                    onTimeUpdate={(e) => setCurrentTime((e.target as HTMLVideoElement).currentTime)}
                   >
-                    {isPlaying ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8" />}
-                  </button>
-                </div>
+                    <source src={`http://localhost:5001/api/recordings/${selectedRecording.id}/video`} type="video/mp4" />
+                    <source src={`http://localhost:5001/api/recordings/${selectedRecording.id}/video`} type="video/webm" />
+                    Your browser does not support the video tag.
+                  </video>
+                ) : (
+                  <>
+                    <img 
+                      src={selectedRecording.thumbnail} 
+                      alt={selectedRecording.title}
+                      className="w-full h-96 object-cover"
+                    />
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                      <div className="text-white text-center">
+                        <Video className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                        <p className="text-lg">Video not available</p>
+                        <p className="text-sm text-gray-400">Video file may be processing or missing</p>
+                      </div>
+                    </div>
+                  </>
+                )}
                 
                 {/* Video Controls Overlay */}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
@@ -688,6 +876,13 @@ const Recordings: React.FC = () => {
                     <FileText className="w-4 h-4" />
                     <span>Transcription</span>
                   </button>
+                  <button 
+                    onClick={() => handleDownload(selectedRecording)}
+                    className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center space-x-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download</span>
+                  </button>
                 </div>
                 <button
                   onClick={() => setShowVideoPlayer(false)}
@@ -787,7 +982,10 @@ const Recordings: React.FC = () => {
                           <p className="text-gray-400 text-sm">AI creates highlight reels automatically</p>
                         </div>
                       </div>
-                      <button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200">
+                      <button 
+                        onClick={() => handleGenerateVideo(selectedRecording)}
+                        className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                      >
                         Generate
                       </button>
                     </div>
@@ -864,7 +1062,10 @@ const Recordings: React.FC = () => {
               {/* Action Buttons */}
               <div className="flex items-center justify-between mt-8 pt-6 border-t border-white/10">
                 <div className="flex items-center space-x-4">
-                  <button className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-6 py-3 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2">
+                  <button 
+                    onClick={() => handleDownload(selectedRecording)}
+                    className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-6 py-3 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2"
+                  >
                     <Download className="w-4 h-4" />
                     <span>Download Original</span>
                   </button>
@@ -886,7 +1087,7 @@ const Recordings: React.FC = () => {
       )}
 
       {/* Empty State */}
-      {filteredRecordings.length === 0 && (
+      {!loading && !error && filteredRecordings.length === 0 && (
         <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-12 text-center">
           <Video className="w-16 h-16 text-gray-400 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-white mb-2">No recordings found</h3>
@@ -909,6 +1110,101 @@ const Recordings: React.FC = () => {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Video Processing Modal */}
+      {showProcessingModal && processingJob && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <div className="bg-gray-900/95 backdrop-blur-md border border-white/20 rounded-2xl max-w-md w-full">
+            <div className="p-8">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-2xl font-bold text-white">Processing Video</h3>
+                {processingJob.status === 'completed' && (
+                  <button
+                    onClick={() => setShowProcessingModal(false)}
+                    className="bg-white/10 hover:bg-white/20 border border-white/20 text-white p-2 rounded-lg transition-all duration-200"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-6">
+                {/* Processing Info */}
+                <div className="text-center">
+                  <h4 className="text-white font-medium mb-2">{processingJob.recording_title}</h4>
+                  <p className="text-gray-400 text-sm mb-4">
+                    Using {processingJob.preset} preset
+                  </p>
+                  
+                  {/* Progress Bar */}
+                  <div className="w-full bg-gray-700 rounded-full h-2 mb-4">
+                    <div 
+                      className="bg-gradient-to-r from-purple-600 to-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.max(0, processingJob.progress)}%` }}
+                    ></div>
+                  </div>
+                  
+                  {/* Status */}
+                  <div className="flex items-center justify-center space-x-2 mb-4">
+                    {processingJob.status === 'processing' && (
+                      <div className="animate-spin w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full"></div>
+                    )}
+                    {processingJob.status === 'completed' && (
+                      <div className="w-4 h-4 bg-green-600 rounded-full flex items-center justify-center">
+                        <span className="text-white text-xs">✓</span>
+                      </div>
+                    )}
+                    {processingJob.status === 'error' && (
+                      <div className="w-4 h-4 bg-red-600 rounded-full flex items-center justify-center">
+                        <span className="text-white text-xs">✗</span>
+                      </div>
+                    )}
+                    <span className="text-sm text-gray-400">
+                      {processingJob.status === 'starting' && 'Starting...'}
+                      {processingJob.status === 'processing' && `${processingJob.progress}%`}
+                      {processingJob.status === 'completed' && 'Completed!'}
+                      {processingJob.status === 'error' && 'Error occurred'}
+                    </span>
+                  </div>
+                  
+                  {/* Message */}
+                  <p className="text-gray-300 text-sm mb-6">{processingJob.message}</p>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-center space-x-4">
+                  {processingJob.status === 'completed' && (
+                    <button
+                      onClick={() => handleDownloadProcessedVideo(processingJob.id)}
+                      className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2"
+                    >
+                      <Download className="w-5 h-5" />
+                      <span>Download Edited Video</span>
+                    </button>
+                  )}
+                  
+                  {processingJob.status === 'error' && (
+                    <button
+                      onClick={() => setShowProcessingModal(false)}
+                      className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-medium transition-all duration-200"
+                    >
+                      Close
+                    </button>
+                  )}
+                  
+                  {(processingJob.status === 'processing' || processingJob.status === 'starting') && (
+                    <div className="text-center">
+                      <p className="text-gray-400 text-sm">
+                        Processing in progress... Please wait.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -1,0 +1,33 @@
+{
+  "id": "-3393582449061048162",
+  "title": "test_vultr_integration",
+  "date": "2025-07-08",
+  "duration": "0:00:13",
+  "size": "0.4 MB",
+  "views": 0,
+  "thumbnail": "",
+  "platforms": [
+    "OBS Recording"
+  ],
+  "status": "ready",
+  "hasTranscription": false,
+  "hasHighlights": false,
+  "hasShorts": false,
+  "categories": [
+    "General"
+  ],
+  "isManualUpload": false,
+  "technical": {
+    "session_path": "recordings/test_vultr_integration",
+    "start_time_iso": "2025-07-08T01:36:11.940863",
+    "end_time_iso": "2025-07-08T01:36:25.329706",
+    "obs_recording_folder": "/home/avgilles/Vid\u00e9os/obs",
+    "obs_recordings": [
+      "/home/avgilles/Vid\u00e9os/obs/2025-07-08 01-36-11.mkv"
+    ],
+    "local_recordings": [
+      "test_vultr_integration/2025-07-08 01-36-11.mkv"
+    ],
+    "file_size_bytes": 436029
+  }
+}

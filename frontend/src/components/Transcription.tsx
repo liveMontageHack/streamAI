@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Save, Mic, MicOff, User, Bot, Trash2 } from 'lucide-react';
+import { RefreshCw, Save, Mic, MicOff, User, Bot, Trash2, Download } from 'lucide-react';
 
 interface Message {
   id: string;
@@ -17,17 +17,40 @@ const Transcription: React.FC<TranscriptionProps> = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [renderError, setRenderError] = useState<string | null>(null);
 
   const API_BASE_URL = 'http://localhost:5001'; // Adjust this to your API server URL
 
+  // Error boundary-like error handling
+  const handleError = (error: Error, context: string) => {
+    console.error(`[ERROR] ${context}:`, error);
+    setRenderError(`Error in ${context}: ${error.message}`);
+  };
+
   // Load saved prompt on component mount
   useEffect(() => {
-    loadSavedPrompt();
-    checkListeningStatus();
+    const initializeComponent = async () => {
+      try {
+        await loadSavedPrompt();
+        await checkListeningStatus();
+      } catch (error) {
+        console.error('[DEBUG] Error during initialization:', error);
+        handleError(error as Error, 'component initialization');
+      }
+    };
+    
+    initializeComponent();
+    
     // Set up polling for new transcriptions - always poll, not just when listening
     const interval = setInterval(pollForTranscriptions, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Set a default prompt if none is loaded
+  const setDefaultPrompt = () => {
+    const defaultPrompt = "You are a transcription editor. Clean up this audio transcription by fixing grammar, spelling, and punctuation errors. Make the text more coherent and readable while preserving the original meaning. Respond ONLY with the corrected transcription text. Do not ask questions, add commentary, or provide explanations.";
+    setPromptMessage(defaultPrompt);
+  };
 
   const checkListeningStatus = async () => {
     try {
@@ -65,46 +88,89 @@ const Transcription: React.FC<TranscriptionProps> = () => {
         const data = await response.json();
         console.log('[DEBUG] Poll response data:', data);
         
-        if (data.transcription) {
-          console.log('[DEBUG] New transcription received:', data.transcription);
-          addRawMessage(data.transcription);
+        if (data.transcription && typeof data.transcription === 'object') {
+          // Handle structured message from API
+          const message = data.transcription;
+          console.log('[DEBUG] New structured transcription received:', message);
+          
+          if (message.content && message.content.trim()) {
+            if (message.type === 'raw') {
+              addRawMessage(message.content.trim());
+            } else if (message.type === 'refined') {
+              // Add refined message directly
+              const refinedMessage: Message = {
+                id: `refined_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                type: 'refined',
+                content: message.content.trim(),
+                timestamp: new Date()
+              };
+              setMessages(prev => [...prev, refinedMessage]);
+            }
+          }
+        } else if (data.transcription && typeof data.transcription === 'string' && data.transcription.trim()) {
+          // Handle simple string transcription (legacy)
+          console.log('[DEBUG] New simple transcription received:', data.transcription);
+          addRawMessage(data.transcription.trim());
         } else {
-          console.log('[DEBUG] No new transcription');
+          console.log('[DEBUG] No new transcription or empty transcription');
         }
       } else {
         console.error('[DEBUG] Poll failed with status:', response.status);
+        // Don't log every 404 - it's normal when no transcription is available
+        if (response.status !== 404) {
+          const errorText = await response.text().catch(() => 'Unknown error');
+          console.error('[DEBUG] Poll error details:', errorText);
+        }
       }
     } catch (error) {
       console.error('[DEBUG] Error polling for transcriptions:', error);
+      // Don't crash the app, just log the error
     }
   };
 
   const addRawMessage = (content: string) => {
     console.log('[DEBUG] Adding raw message:', content);
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      type: 'raw',
-      content,
-      timestamp: new Date()
-    };
-    setMessages(prev => {
-      const updated = [...prev, newMessage];
-      console.log('[DEBUG] Messages updated, count:', updated.length);
-      return updated;
-    });
     
-    // Automatically refine if prompt is available
-    if (promptMessage.trim()) {
-      console.log('[DEBUG] Auto-refining message with prompt');
-      refineMessage(content);
-    } else {
-      console.log('[DEBUG] No prompt available for auto-refinement');
+    try {
+      const newMessage: Message = {
+        id: `raw_${Date.now()}`,
+        type: 'raw',
+        content,
+        timestamp: new Date()
+      };
+      
+      setMessages(prev => {
+        const updated = [...prev, newMessage];
+        console.log('[DEBUG] Messages updated, count:', updated.length);
+        return updated;
+      });
+      
+      // Trigger refinement after a small delay to ensure state is updated
+      if (promptMessage && promptMessage.trim()) {
+        console.log('[DEBUG] Triggering refinement with prompt');
+        setTimeout(() => {
+          refineMessage(content).catch(error => {
+            console.error('[DEBUG] Refinement failed:', error);
+            handleError(error, 'refinement');
+          });
+        }, 200);
+      } else {
+        console.log('[DEBUG] No prompt available for auto-refinement');
+      }
+      
+    } catch (error) {
+      console.error('[DEBUG] Error in addRawMessage:', error);
+      handleError(error as Error, 'adding raw message');
     }
   };
 
   const refineMessage = async (rawContent: string) => {
-    if (!promptMessage.trim()) return;
+    if (!promptMessage.trim()) {
+      console.log('[DEBUG] No prompt message available for refinement');
+      return;
+    }
     
+    console.log('[DEBUG] Starting refinement process...');
     setIsRefining(true);
     
     try {
@@ -113,39 +179,67 @@ const Transcription: React.FC<TranscriptionProps> = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ raw_text: rawContent }),
+        body: JSON.stringify({ 
+          raw_text: rawContent,
+          prompt: promptMessage.trim()
+        }),
       });
+
+      console.log('[DEBUG] Refinement response status:', response.status);
 
       if (response.ok) {
         const data = await response.json();
+        console.log('[DEBUG] Refinement successful:', data.refined_text?.substring(0, 50) + '...');
+        
         const refinedMessage: Message = {
-          id: Date.now().toString() + '_refined',
+          id: `refined_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           type: 'refined',
-          content: data.refined_text || '',
+          content: data.refined_text || 'No refined text received',
           timestamp: new Date()
         };
-        setMessages(prev => [...prev, refinedMessage]);
+        
+        setMessages(prev => {
+          console.log('[DEBUG] Adding refined message to', prev.length, 'existing messages');
+          return [...prev, refinedMessage];
+        });
       } else {
-        const errorData = await response.json();
-        console.error('Refinement error:', errorData.error);
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('[DEBUG] Refinement error:', errorData.error);
+        
+        // Check if it's a Groq capacity issue
+        if (errorData.error && errorData.error.includes('over capacity')) {
+          console.log('[DEBUG] Groq API is over capacity, skipping refinement for now');
+          // Don't show error message for capacity issues - just skip refinement
+          return;
+        }
+        
         const errorMessage: Message = {
-          id: Date.now().toString() + '_error',
+          id: `error_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           type: 'refined',
-          content: `Error: ${errorData.error}`,
+          content: `Refinement failed: ${errorData.error}`,
           timestamp: new Date()
         };
         setMessages(prev => [...prev, errorMessage]);
       }
     } catch (error) {
-      console.error('Error refining transcription:', error);
+      console.error('[DEBUG] Error refining transcription:', error);
+      
+      // Check if it's a network timeout or capacity issue
+      const errorStr = error instanceof Error ? error.message : 'Unknown error';
+      if (errorStr.includes('over capacity') || errorStr.includes('503')) {
+        console.log('[DEBUG] Groq API capacity issue detected, skipping refinement');
+        return;
+      }
+      
       const errorMessage: Message = {
-        id: Date.now().toString() + '_error',
+        id: `error_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         type: 'refined',
-        content: 'Error occurred during refinement',
+        content: `Refinement error: ${errorStr}`,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
+      console.log('[DEBUG] Refinement process completed');
       setIsRefining(false);
     }
   };
@@ -182,6 +276,28 @@ const Transcription: React.FC<TranscriptionProps> = () => {
   const clearAllMessages = () => {
     setMessages([]);
   };
+
+  const downloadTranscription = () => {
+    if (messages.length === 0) return;
+    
+    const transcriptionText = messages.map(message => {
+      const timeStr = message.timestamp.toLocaleString();
+      const typeStr = message.type === 'raw' ? 'Raw Transcription' : 'Refined Transcription';
+      return `[${timeStr}] ${typeStr}:\n${message.content}\n`;
+    }).join('\n');
+    
+    const blob = new Blob([transcriptionText], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `transcription-${new Date().toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+
 
   const toggleListening = async () => {
     const newListeningState = !isListening;
@@ -244,11 +360,31 @@ const Transcription: React.FC<TranscriptionProps> = () => {
   };
 
   const formatTime = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    try {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (error) {
+      console.error('[DEBUG] Error formatting time:', error);
+      return 'Unknown time';
+    }
   };
+
+  // Add debugging for re-renders
+  console.log('[DEBUG] Transcription component render - messages count:', messages.length, 'isListening:', isListening);
 
   return (
     <div className="space-y-6">
+      {renderError && (
+        <div className="bg-red-600/20 border border-red-500/30 rounded-lg p-4 mb-4">
+          <h3 className="text-red-400 font-semibold mb-2">Error Detected</h3>
+          <p className="text-red-300 text-sm">{renderError}</p>
+          <button 
+            onClick={() => setRenderError(null)}
+            className="mt-2 px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-white text-sm"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
         <h2 className="text-2xl font-bold text-white mb-6">Real-time Transcription Chat</h2>
         
@@ -259,6 +395,12 @@ const Transcription: React.FC<TranscriptionProps> = () => {
               Refinement Prompt Message
             </label>
             <div className="flex gap-2">
+              <button
+                onClick={setDefaultPrompt}
+                className="px-3 py-1 bg-purple-600 hover:bg-purple-700 rounded-md text-white text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                Use Default
+              </button>
               <button
                 onClick={toggleListening}
                 className={`px-3 py-1 rounded-md text-white text-sm font-medium transition-colors flex items-center gap-2 ${
@@ -283,10 +425,10 @@ const Transcription: React.FC<TranscriptionProps> = () => {
             value={promptMessage}
             onChange={(e) => setPromptMessage(e.target.value)}
             className="w-full h-20 p-3 bg-white/5 border border-white/30 rounded-lg text-white placeholder-white/60 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-            placeholder="Enter your refinement prompt here (e.g., 'Clean up this transcription, fix grammar, and make it more coherent...')"
+            placeholder="Enter your refinement prompt here (e.g., 'Clean up this transcription, fix grammar and spelling errors, and make it more coherent. Provide only the corrected transcription without asking questions or adding commentary.')"
           />
           <p className="text-sm text-white/60 mt-1">
-            This prompt will be used to refine raw transcriptions using LLaMA via Groq API
+            This prompt will be used to refine raw transcriptions using LLaMA via Groq API. Be specific about wanting only the corrected transcription without questions or commentary.
           </p>
         </div>
 
@@ -295,6 +437,14 @@ const Transcription: React.FC<TranscriptionProps> = () => {
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-white">Transcription Chat</h3>
             <div className="flex gap-2">
+              <button
+                onClick={downloadTranscription}
+                disabled={messages.length === 0}
+                className="px-3 py-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:opacity-50 rounded-md text-white text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Download
+              </button>
               <button
                 onClick={clearAllMessages}
                 className="px-3 py-1 bg-gray-600 hover:bg-gray-700 rounded-md text-white text-sm font-medium transition-colors flex items-center gap-2"
@@ -313,41 +463,49 @@ const Transcription: React.FC<TranscriptionProps> = () => {
             </div>
           ) : (
             <div className="space-y-4">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex ${message.type === 'raw' ? 'justify-start' : 'justify-end'}`}
-                >
+              {messages.filter(Boolean).map((message) => {
+                if (!message || !message.id || !message.content) {
+                  console.warn('[DEBUG] Skipping invalid message:', message);
+                  return null;
+                }
+                
+                return (
                   <div
-                    className={`max-w-[70%] rounded-lg p-3 ${
-                      message.type === 'raw'
-                        ? 'bg-blue-600/20 border border-blue-500/30 text-blue-100'
-                        : 'bg-purple-600/20 border border-purple-500/30 text-purple-100'
-                    }`}
+                    key={message.id}
+                    className={`flex ${message.type === 'raw' ? 'justify-start' : 'justify-end'}`}
                   >
-                    <div className="flex items-start gap-2">
-                      <div className="flex-shrink-0 mt-1">
-                        {message.type === 'raw' ? (
-                          <User className="w-4 h-4" />
-                        ) : (
-                          <Bot className="w-4 h-4" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-medium opacity-80">
-                            {message.type === 'raw' ? 'Me (Raw)' : 'LLaMA (Refined)'}
-                          </span>
-                          <span className="text-xs opacity-60">
-                            {formatTime(message.timestamp)}
-                          </span>
+                    <div
+                      className={`max-w-[70%] rounded-lg p-3 ${
+                        message.type === 'raw'
+                          ? 'bg-blue-600/20 border border-blue-500/30 text-blue-100'
+                          : 'bg-purple-600/20 border border-purple-500/30 text-purple-100'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <div className="flex-shrink-0 mt-1">
+                          {message.type === 'raw' ? (
+                            <User className="w-4 h-4" />
+                          ) : (
+                            <Bot className="w-4 h-4" />
+                          )}
                         </div>
-                        <p className="text-sm leading-relaxed">{message.content}</p>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-medium opacity-80">
+                              {message.type === 'raw' ? 'Me (Raw)' : 'LLaMA (Refined)'}
+                            </span>
+                            <span className="text-xs opacity-60">
+                              {message.timestamp ? formatTime(message.timestamp) : 'Unknown time'}
+                            </span>
+                          </div>
+                          <p className="text-sm leading-relaxed">{message.content}</p>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
+              
               
               {isRefining && (
                 <div className="flex justify-end">

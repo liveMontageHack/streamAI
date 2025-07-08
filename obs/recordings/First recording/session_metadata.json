@@ -1,0 +1,33 @@
+{
+  "id": "-2213572019723354525",
+  "title": "First recording",
+  "date": "2025-07-07",
+  "duration": "0:00:04",
+  "size": "0.6 MB",
+  "views": 0,
+  "thumbnail": "",
+  "platforms": [
+    "OBS Recording"
+  ],
+  "status": "ready",
+  "hasTranscription": false,
+  "hasHighlights": false,
+  "hasShorts": false,
+  "categories": [
+    "General"
+  ],
+  "isManualUpload": false,
+  "technical": {
+    "session_path": "recordings\\First recording",
+    "start_time_iso": "2025-07-07T22:28:24.948615",
+    "end_time_iso": "2025-07-07T22:28:28.987406",
+    "obs_recording_folder": "C:\\Users\\manuc\\Videos",
+    "obs_recordings": [
+      "C:\\Users\\manuc\\Videos\\2025-07-07 22-28-24.mkv"
+    ],
+    "local_recordings": [
+      "First recording\\2025-07-07 22-28-24.mkv"
+    ],
+    "file_size_bytes": 651264
+  }
+}

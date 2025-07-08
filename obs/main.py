@@ -176,26 +176,7 @@ class StreamAIApp:
     
     async def list_sessions(self):
         """List all recording sessions"""
-        sessions = self.recording_manager.list_sessions()
-        
-        if not sessions:
-            print("No recording sessions found")
-            return True
-        
-        print(f"\n=== Recording Sessions ({len(sessions)} found) ===")
-        for i, session in enumerate(sessions, 1):
-            print(f"{i}. {session['name']}")
-            print(f"   Created: {session['created']}")
-            print(f"   Path: {session['path']}")
-            print(f"   Files: {len(session['files'])} files")
-            if session['files']:
-                for file in session['files'][:3]:  # Show first 3 files
-                    print(f"     - {file}")
-                if len(session['files']) > 3:
-                    print(f"     ... and {len(session['files']) - 3} more")
-            print()
-        
-        return True
+        return self.recording_manager.list_sessions()
     
     async def get_obs_data(self):
         """Get and display current OBS data"""

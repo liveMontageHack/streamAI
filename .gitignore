@@ -235,4 +235,4 @@ logs
 .node_repl_history
 
 # Environment variables
-.env*
+.env

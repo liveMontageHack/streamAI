@@ -12,7 +12,7 @@ import threading
 from datetime import datetime
 
 # Add the realtime_audio directory to the path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'realtime_audio'))
+sys.path.append(os.path.dirname(__file__))
 
 try:
     from transcription import Transcription
