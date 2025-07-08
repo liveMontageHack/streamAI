@@ -22,11 +22,12 @@ if __name__ == '__main__':
     # Get port from environment variable (Railway sets this automatically)
     port = int(os.environ.get('PORT', 5001))
     
-    # Set production environment
-    debug = os.environ.get('FLASK_ENV') != 'production'
+    # Set production environment - disable debug in production
+    debug = False
     
     print(f"Starting StreamAI server on port {port}")
     print(f"Debug mode: {debug}")
+    print(f"Environment: {os.environ.get('RAILWAY_ENVIRONMENT', 'local')}")
     
     # Run the application
     socketio.run(
@@ -34,5 +35,6 @@ if __name__ == '__main__':
         debug=debug, 
         host='0.0.0.0', 
         port=port,
-        allow_unsafe_werkzeug=True  # Required for production with SocketIO
+        allow_unsafe_werkzeug=True,  # Required for production with SocketIO
+        log_output=True  # Enable logging for Railway
     )
