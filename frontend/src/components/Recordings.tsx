@@ -67,7 +67,8 @@ const Recordings: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      const response = await fetch('http://localhost:5001/api/recordings');
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+      const response = await fetch(`${apiUrl}/api/recordings`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -86,7 +87,8 @@ const Recordings: React.FC = () => {
             videoPath = recording.technical.local_recordings[0];
             // Generate thumbnail URL for video (backend should serve these)
             if (!thumbnail) {
-              thumbnail = `http://localhost:5001/api/recordings/${recording.id}/thumbnail`;
+              const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+              thumbnail = `${apiUrl}/api/recordings/${recording.id}/thumbnail`;
             }
           }
           
@@ -133,7 +135,8 @@ const Recordings: React.FC = () => {
   // Fetch available video processing presets
   const fetchVideoPresets = async () => {
     try {
-      const response = await fetch('http://localhost:5001/api/video/presets');
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+      const response = await fetch(`${apiUrl}/api/video/presets`);
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
@@ -148,7 +151,8 @@ const Recordings: React.FC = () => {
   // Start video processing
   const handleGenerateVideo = async (recording: Recording) => {
     try {
-      const response = await fetch('http://localhost:5001/api/video/process', {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+      const response = await fetch(`${apiUrl}/api/video/process`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -190,7 +194,8 @@ const Recordings: React.FC = () => {
   const pollProcessingStatus = async (jobId: string) => {
     const poll = async () => {
       try {
-        const response = await fetch(`http://localhost:5001/api/video/status/${jobId}`);
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+        const response = await fetch(`${apiUrl}/api/video/status/${jobId}`);
         if (response.ok) {
           const data = await response.json();
           if (data.success) {
@@ -217,7 +222,8 @@ const Recordings: React.FC = () => {
 
   // Download processed video
   const handleDownloadProcessedVideo = (jobId: string) => {
-    const downloadUrl = `http://localhost:5001/api/video/download/${jobId}`;
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+    const downloadUrl = `${apiUrl}/api/video/download/${jobId}`;
     const link = document.createElement('a');
     link.href = downloadUrl;
     document.body.appendChild(link);
@@ -354,7 +360,8 @@ const Recordings: React.FC = () => {
   // Handle video download
   const handleDownload = (recording: Recording) => {
     if (recording.id) {
-      const downloadUrl = `http://localhost:5001/api/recordings/${recording.id}/download`;
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+      const downloadUrl = `${apiUrl}/api/recordings/${recording.id}/download`;
       // Create a temporary link to trigger the download
       const link = document.createElement('a');
       link.href = downloadUrl;
@@ -749,8 +756,8 @@ const Recordings: React.FC = () => {
                     poster={selectedRecording.thumbnail}
                     onTimeUpdate={(e) => setCurrentTime((e.target as HTMLVideoElement).currentTime)}
                   >
-                    <source src={`http://localhost:5001/api/recordings/${selectedRecording.id}/video`} type="video/mp4" />
-                    <source src={`http://localhost:5001/api/recordings/${selectedRecording.id}/video`} type="video/webm" />
+                    <source src={`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/recordings/${selectedRecording.id}/video`} type="video/mp4" />
+                    <source src={`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/recordings/${selectedRecording.id}/video`} type="video/webm" />
                     Your browser does not support the video tag.
                   </video>
                 ) : (
