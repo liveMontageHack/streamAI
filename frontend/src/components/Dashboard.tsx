@@ -21,10 +21,13 @@ import {
   ChevronDown,
   Plus,
   X,
-  Check
+  Check,
+  AlertTriangle
 } from 'lucide-react';
+import { useAppMode } from '../hooks/useAppMode';
 
 const Dashboard: React.FC = () => {
+  const { apiUrl, isDemo, features } = useAppMode();
   const [twitchEnabled, setTwitchEnabled] = useState(true);
   const [youtubeEnabled, setYoutubeEnabled] = useState(false);
   const [discordEnabled, setDiscordEnabled] = useState(true);
@@ -67,10 +70,16 @@ const Dashboard: React.FC = () => {
       return;
     }
 
+    // Demo mode limitation
+    if (isDemo) {
+      alert('🚀 Mode Démo: L\'enregistrement réel n\'est pas disponible. Installez la version locale pour cette fonctionnalité.');
+      return;
+    }
+
     try {
       if (isRecording) {
         // Stop recording
-        const response = await fetch('http://localhost:5001/api/recording/stop', {
+        const response = await fetch(`${apiUrl}/api/recording/stop`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -88,7 +97,7 @@ const Dashboard: React.FC = () => {
         }
       } else {
         // Start recording with stream title as session name
-        const response = await fetch('http://localhost:5001/api/recording/start', {
+        const response = await fetch(`${apiUrl}/api/recording/start`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -110,7 +119,11 @@ const Dashboard: React.FC = () => {
       }
     } catch (error) {
       console.error('Error communicating with API:', error);
-      alert('Error: Could not connect to StreamAI API server. Make sure it\'s running on port 5001.');
+      if (isDemo) {
+        alert('🚀 Mode Démo: Impossible de se connecter au serveur local. Cette fonctionnalité nécessite l\'installation locale.');
+      } else {
+        alert('Error: Could not connect to StreamAI API server. Make sure it\'s running on port 5001.');
+      }
     }
   };
 
