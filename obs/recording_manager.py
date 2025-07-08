@@ -6,6 +6,7 @@ from pathlib import Path
 from obs_controller import OBSController
 from youtube_api import YouTubeAPI
 from config import config
+from vultr_service import vultr_service
 
 class RecordingManager:
     """Main recording manager that coordinates OBS and YouTube API functionality"""
@@ -168,6 +169,9 @@ class RecordingManager:
                 # Save metadata with all session information
                 self.save_session_metadata()
                 
+                # Check for auto-upload to Vultr
+                await self._handle_auto_upload()
+                
                 self.logger.info(f"Recording session stopped: {self.current_session['name']}")
             else:
                 self.logger.info("OBS recording stopped (no session was active)")
@@ -248,6 +252,93 @@ class RecordingManager:
                 self.logger.warning(f"OBS recording file not found: {obs_recording_path}")
         except Exception as e:
             self.logger.error(f"Failed to copy recording to session folder: {e}")
+    
+    async def _handle_auto_upload(self):
+        """Handle automatic upload to Vultr if enabled"""
+        try:
+            # Check if auto-upload is enabled
+            vultr_config = config.get_vultr_config()
+            if not vultr_config['auto_upload']:
+                self.logger.debug("Auto-upload to Vultr is disabled")
+                return
+            
+            # Check if Vultr service is configured
+            if not vultr_service.is_configured():
+                self.logger.warning("Vultr service not configured, skipping auto-upload")
+                return
+            
+            # Check if we have recordings to upload
+            if not self.current_session or not self.current_session.get('local_recordings'):
+                self.logger.warning("No recordings to upload")
+                return
+            
+            self.logger.info("Starting automatic upload to Vultr...")
+            
+            # Upload each recording
+            upload_results = []
+            for recording_path in self.current_session['local_recordings']:
+                full_path = self.recordings_path / recording_path
+                
+                if not full_path.exists():
+                    self.logger.warning(f"Recording file not found: {full_path}")
+                    continue
+                
+                self.logger.info(f"Uploading to Vultr: {full_path.name}")
+                
+                # Upload the file
+                result = vultr_service.upload_file(
+                    full_path,
+                    session_name=self.current_session['name'],
+                    auto_process=True  # Enable auto-processing on Vultr
+                )
+                
+                if result['success']:
+                    self.logger.info(f"Successfully uploaded to Vultr: {result['task_id']}")
+                    upload_results.append({
+                        'file': recording_path,
+                        'task_id': result['task_id'],
+                        'upload_time': result['upload_time'],
+                        'success': True
+                    })
+                    
+                    # Update session metadata with Vultr info
+                    if 'vultr_uploads' not in self.current_session:
+                        self.current_session['vultr_uploads'] = []
+                    
+                    self.current_session['vultr_uploads'].append({
+                        'task_id': result['task_id'],
+                        'file_name': result['file_name'],
+                        'upload_time': result['upload_time'],
+                        'file_size': result['file_size']
+                    })
+                    
+                else:
+                    self.logger.error(f"Failed to upload to Vultr: {result.get('error', 'Unknown error')}")
+                    upload_results.append({
+                        'file': recording_path,
+                        'error': result.get('error', 'Unknown error'),
+                        'success': False
+                    })
+            
+            # Update session metadata with upload results
+            if upload_results:
+                # Add Vultr Processing to platforms if uploads were successful
+                successful_uploads = [r for r in upload_results if r['success']]
+                if successful_uploads:
+                    # Update metadata to include Vultr processing
+                    additional_metadata = {
+                        'platforms': ['Vultr Processing'],
+                        'vultr_uploads': upload_results,
+                        'auto_upload_completed': True
+                    }
+                    self.save_session_metadata(additional_metadata)
+                    
+                    self.logger.info(f"Auto-upload completed: {len(successful_uploads)}/{len(upload_results)} files uploaded successfully")
+                else:
+                    self.logger.error("All auto-uploads failed")
+            
+        except Exception as e:
+            self.logger.error(f"Error during auto-upload to Vultr: {e}")
     
     def get_current_session_info(self):
         """Get information about the current session"""

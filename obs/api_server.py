@@ -21,6 +21,7 @@ from datetime import datetime
 from recording_manager import RecordingManager
 from main import StreamAIApp
 from video_processor import StreamAIVideoProcessor
+from vultr_service import vultr_service
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -760,5 +761,113 @@ def download_recording_video(recording_id):
     finally:
         loop.close()
 
+# Vultr Upload Endpoints
+
+@app.route('/api/vultr/status', methods=['GET'])
+def get_vultr_status():
+    """Get Vultr service status and configuration"""
+    try:
+        config_info = vultr_service.get_config_info()
+        connection_test = vultr_service.test_connection()
+        
+        return jsonify({
+            "success": True,
+            "config": config_info,
+            "connection": connection_test
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/vultr/upload', methods=['POST'])
+def upload_to_vultr():
+    """Upload a recording to Vultr server"""
+    try:
+        data = request.get_json() or {}
+        recording_id = data.get('recording_id')
+        auto_process = data.get('auto_process', False)
+        
+        if not recording_id:
+            return jsonify({"error": "No recording ID provided"}), 400
+        
+        # Get the recording
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        success = loop.run_until_complete(stream_app.initialize())
+        if not success:
+            return jsonify({"error": "Failed to initialize application"}), 500
+        
+        recordings = loop.run_until_complete(stream_app.list_sessions())
+        recording = None
+        
+        for rec in recordings:
+            if rec.get('id') == recording_id:
+                recording = rec
+                break
+        
+        if not recording:
+            return jsonify({"error": "Recording not found"}), 404
+        
+        # Get video path
+        video_path = None
+        if recording.get('technical', {}).get('local_recordings'):
+            relative_path = recording['technical']['local_recordings'][0]
+            recordings_dir = Path(__file__).parent / 'recordings'
+            video_path = recordings_dir / relative_path
+            
+            if not video_path.exists():
+                session_name = recording['title']
+                filename = relative_path.split('/')[-1]
+                video_path = recordings_dir / session_name / filename
+            
+            if not video_path.exists() and recording['technical'].get('obs_recordings'):
+                video_path = Path(recording['technical']['obs_recordings'][0])
+        
+        if not video_path or not video_path.exists():
+            return jsonify({"error": "Video file not found"}), 404
+        
+        # Upload to Vultr
+        session_name = recording.get('title', 'Unknown')
+        upload_result = vultr_service.upload_file(
+            video_path, 
+            session_name=session_name,
+            auto_process=auto_process
+        )
+        
+        return jsonify(upload_result)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        loop.close()
+
+@app.route('/api/vultr/upload/status/<task_id>', methods=['GET'])
+def get_vultr_upload_status(task_id):
+    """Get the status of a Vultr upload/processing task"""
+    try:
+        result = vultr_service.get_upload_status(task_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/vultr/uploads', methods=['GET'])
+def list_vultr_uploads():
+    """List recent Vultr uploads"""
+    try:
+        limit = request.args.get('limit', 10, type=int)
+        result = vultr_service.list_uploads(limit)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/vultr/test', methods=['GET'])
+def test_vultr_connection():
+    """Test connection to Vultr server"""
+    try:
+        result = vultr_service.test_connection()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+    socketio.run(app, debug=True, host='0.0.0.0', port=5001)

@@ -25,6 +25,11 @@ class Config:
     RECORDINGS_PATH = Path(os.getenv('RECORDINGS_PATH', './recordings'))
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     
+    # Vultr Configuration
+    VULTR_API_URL = os.getenv('VULTR_API_URL', 'http://45.32.145.22')
+    VULTR_UPLOAD_ENDPOINT = os.getenv('VULTR_UPLOAD_ENDPOINT', '/upload')
+    VULTR_AUTO_UPLOAD = os.getenv('VULTR_AUTO_UPLOAD', 'false').lower() == 'true'
+    
     def setup_logging(self):
         """Setup logging configuration"""
         logging.basicConfig(
@@ -64,6 +69,14 @@ class Config:
     def get_recordings_path(self):
         """Get recordings directory path"""
         return self.RECORDINGS_PATH
+    
+    def get_vultr_config(self):
+        """Get Vultr configuration"""
+        return {
+            'api_url': self.VULTR_API_URL,
+            'upload_endpoint': self.VULTR_UPLOAD_ENDPOINT,
+            'auto_upload': self.VULTR_AUTO_UPLOAD
+        }
 
 # Global config instance
 config = Config()

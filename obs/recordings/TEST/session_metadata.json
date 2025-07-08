@@ -1,0 +1,35 @@
+{
+  "id": "-1506748891621117218",
+  "title": "TEST",
+  "date": "2025-07-08",
+  "duration": "0:14:49",
+  "size": "2.4 MB",
+  "views": 0,
+  "thumbnail": "",
+  "platforms": [
+    "OBS Recording"
+  ],
+  "status": "ready",
+  "hasTranscription": false,
+  "hasHighlights": false,
+  "hasShorts": false,
+  "categories": [
+    "General"
+  ],
+  "isManualUpload": false,
+  "technical": {
+    "session_path": "recordings/TEST",
+    "start_time_iso": "2025-07-08T02:34:19.455575",
+    "end_time_iso": "2025-07-08T02:49:08.907656",
+    "obs_recording_folder": "/home/avgilles/Vid\u00e9os/obs",
+    "obs_recordings": [
+      "/home/avgilles/Vid\u00e9os/obs/2025-07-08 02-34-19.mkv",
+      "/home/avgilles/Vid\u00e9os/obs/2025-07-08 02-48-50.mkv"
+    ],
+    "local_recordings": [
+      "TEST/2025-07-08 02-34-19.mkv",
+      "TEST/2025-07-08 02-48-50.mkv"
+    ],
+    "file_size_bytes": 2513842
+  }
+}

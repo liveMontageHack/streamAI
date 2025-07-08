@@ -9,5 +9,6 @@ flask-cors
 flask-socketio
 groq
 requests
+pathlib
 opencv-python
 numpy
