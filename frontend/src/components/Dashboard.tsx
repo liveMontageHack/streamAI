@@ -196,7 +196,8 @@ const Dashboard: React.FC = () => {
         </div>
 
         {/* Stream Preparation */}
-        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 mb-8">
+        <div className="relative overflow-visible z-10">
+          <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 mb-8">
           <h2 className="text-2xl font-semibold text-white mb-6 flex items-center space-x-2">
             <Edit3 className="w-6 h-6" />
             <span>Stream Preparation</span>
@@ -243,7 +244,7 @@ const Dashboard: React.FC = () => {
                 </div>
               )}
 
-              <div className="relative">
+              <div className="relative overflow-visible">
                 <button
                   onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
                   className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-left text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 flex items-center justify-between"
@@ -401,9 +402,12 @@ const Dashboard: React.FC = () => {
             </div>
           )}
         </div>
+        </div>
+
+        {/* Stream Controls */}
 
         {/* Platform Selection */}
-        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 mb-8">
+        <div className="relative z-0 bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 mb-8">
           <h2 className="text-2xl font-semibold text-white mb-6 flex items-center space-x-2">
             <Radio className="w-6 h-6" />
             <span>Platform Selection</span>

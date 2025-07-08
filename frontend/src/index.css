@@ -1,3 +1,15 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* --- Custom styles below --- */
+
+/* Example: Custom dropdown menu style */
+.custom-dropdown-menu {
+  @apply absolute z-50 bg-white rounded-lg shadow-lg mt-2 w-full;
+}
+
+/* Example: To fix dropdown being hidden */
+.no-overflow {
+  overflow: visible !important;
+}
