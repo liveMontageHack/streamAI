@@ -50,6 +50,14 @@ transcription_queue = queue.Queue()
 processing_jobs = {}
 job_counter = 0
 
+# Global app settings (similar to production server)
+app_settings = {
+    "groq_api_key": "",
+    "webhook_url": "",
+    "auto_notifications": True,
+    "transcription_language": "en"
+}
+
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """Get system status"""
@@ -187,7 +195,7 @@ def get_transcription_prompt():
 @app.route('/api/transcription/refine', methods=['POST'])
 def refine_transcription():
     """Refine transcription using the provided or saved prompt"""
-    global current_refinement_prompt
+    global current_refinement_prompt, app_settings
     try:
         data = request.get_json() or {}
         raw_text = data.get('raw_text', '')
@@ -202,10 +210,15 @@ def refine_transcription():
         if not prompt_to_use:
             return jsonify({"error": "No refinement prompt provided or saved"}), 400
         
+        # Check if Groq API key is configured
+        # Allow temporary key for validation, otherwise use stored key
+        groq_api_key = data.get('groq_api_key') or app_settings.get('groq_api_key') or os.environ.get('GROQ_API_KEY')
+        if not groq_api_key:
+            return jsonify({"error": "Groq API key not configured. Please set it in Settings."}), 400
+        
         # Import and use the refinement function
         try:
             import sys
-            import os
             # Add the realtime_audio directory to the path
             realtime_audio_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'realtime_audio')
             if realtime_audio_path not in sys.path:
@@ -213,7 +226,7 @@ def refine_transcription():
             
             from refinement import refine_transcription
             
-            refined_text = refine_transcription(raw_text, prompt_to_use)
+            refined_text = refine_transcription(raw_text, prompt_to_use, groq_api_key)
             
             return jsonify({
                 "success": True,
@@ -224,7 +237,19 @@ def refine_transcription():
         except ImportError as e:
             return jsonify({"error": f"Could not import refinement module: {str(e)}"}), 500
         except Exception as e:
-            return jsonify({"error": f"Refinement failed: {str(e)}"}), 500
+            error_msg = str(e).lower()
+            
+            # Check for specific Groq API errors
+            if "invalid api key" in error_msg or "unauthorized" in error_msg or "401" in error_msg:
+                return jsonify({"error": "Invalid Groq API key. Please check your API key in Settings."}), 401
+            elif "rate limit" in error_msg or "429" in error_msg:
+                return jsonify({"error": "Groq API rate limit exceeded. Please try again later."}), 429
+            elif "over capacity" in error_msg or "503" in error_msg:
+                return jsonify({"error": "Groq API is over capacity. Please try again in a moment."}), 503
+            elif "connection" in error_msg or "network" in error_msg or "timeout" in error_msg:
+                return jsonify({"error": "Network error connecting to Groq API. Please check your internet connection."}), 503
+            else:
+                return jsonify({"error": f"Groq AI refinement failed: {str(e)}"}), 500
             
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -233,6 +258,115 @@ def refine_transcription():
 def health_check():
     """Health check endpoint"""
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    """Get current application settings"""
+    global app_settings
+    # Don't return sensitive data like API keys in full
+    safe_settings = app_settings.copy()
+    if safe_settings.get("groq_api_key"):
+        safe_settings["groq_api_key"] = "••••••••••••••••••••••••••••••••••••••••"
+    
+    return jsonify({"success": True, "settings": safe_settings})
+
+@app.route('/api/settings', methods=['POST'])
+def save_settings():
+    """Save application settings"""
+    global app_settings
+    try:
+        data = request.get_json() or {}
+        
+        # Update settings with provided data
+        if 'groq_api_key' in data:
+            app_settings['groq_api_key'] = data['groq_api_key']
+        if 'webhook_url' in data:
+            app_settings['webhook_url'] = data['webhook_url']
+        if 'auto_notifications' in data:
+            app_settings['auto_notifications'] = data['auto_notifications']
+        if 'transcription_language' in data:
+            app_settings['transcription_language'] = data['transcription_language']
+        
+        return jsonify({"success": True, "message": "Settings saved successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/transcription/validate-key', methods=['POST'])
+def validate_groq_api_key():
+    """Validate a Groq API key without saving it"""
+    try:
+        data = request.get_json() or {}
+        test_api_key = data.get('api_key', '')
+        
+        if not test_api_key:
+            return jsonify({"error": "No API key provided for validation"}), 400
+        
+        # Try to use Groq for a simple test
+        try:
+            # Add the realtime_audio directory to the path for imports
+            import sys
+            realtime_audio_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'realtime_audio')
+            if realtime_audio_path not in sys.path:
+                sys.path.append(realtime_audio_path)
+            
+            from groq import Groq
+            
+            client = Groq(api_key=test_api_key)
+            
+            # Simple test message
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'You are a test assistant. Respond with exactly: "API key validated successfully"'
+                    },
+                    {
+                        'role': 'user',
+                        'content': 'Test message'
+                    }
+                ],
+                model='llama-3.1-8b-instant',
+                max_tokens=20
+            )
+            
+            response_text = chat_completion.choices[0].message.content.strip()
+            
+            return jsonify({
+                "success": True,
+                "valid": True,
+                "message": "API key is valid and working correctly"
+            })
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            
+            # Check for specific Groq API errors
+            if "invalid api key" in error_msg or "unauthorized" in error_msg or "401" in error_msg:
+                return jsonify({
+                    "success": True,
+                    "valid": False,
+                    "message": "Invalid API key"
+                }), 200  # Return 200 for successful validation check, even if key is invalid
+            elif "rate limit" in error_msg or "429" in error_msg:
+                return jsonify({
+                    "success": True,
+                    "valid": True,
+                    "message": "API key is valid but rate limited"
+                }), 200
+            elif "over capacity" in error_msg or "503" in error_msg:
+                return jsonify({
+                    "success": True,
+                    "valid": True,
+                    "message": "API key is valid but service is over capacity"
+                }), 200
+            else:
+                return jsonify({
+                    "success": False,
+                    "error": f"Validation failed: {str(e)}"
+                }), 500
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/transcription/poll', methods=['GET'])
 def poll_transcriptions():

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Save, Mic, MicOff, User, Bot, Trash2, Download } from 'lucide-react';
+import { useSettings } from '../contexts/SettingsContext';
+import { clientAudioService, ClientAudioService, TranscriptionResult } from '../services/ClientAudioService';
 
 interface Message {
   id: string;
@@ -11,6 +13,7 @@ interface Message {
 interface TranscriptionProps {}
 
 const Transcription: React.FC<TranscriptionProps> = () => {
+  const { settings } = useSettings();
   const [promptMessage, setPromptMessage] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isRefining, setIsRefining] = useState(false);
@@ -19,7 +22,8 @@ const Transcription: React.FC<TranscriptionProps> = () => {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [renderError, setRenderError] = useState<string | null>(null);
 
-  const API_BASE_URL = 'http://localhost:5001'; // Adjust this to your API server URL
+  // Use proxy instead of hardcoded URL
+  // const API_BASE_URL = 'http://localhost:5001'; // Remove this line
 
   // Error boundary-like error handling
   const handleError = (error: Error, context: string) => {
@@ -54,7 +58,7 @@ const Transcription: React.FC<TranscriptionProps> = () => {
 
   const checkListeningStatus = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/transcription/listening/status`);
+      const response = await fetch('/api/transcription/listening/status');
       if (response.ok) {
         const data = await response.json();
         console.log('[DEBUG] Current listening status:', data);
@@ -67,7 +71,7 @@ const Transcription: React.FC<TranscriptionProps> = () => {
 
   const loadSavedPrompt = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/transcription/prompt`);
+      const response = await fetch('/api/transcription/prompt');
       if (response.ok) {
         const data = await response.json();
         setPromptMessage(data.prompt || '');
@@ -81,7 +85,7 @@ const Transcription: React.FC<TranscriptionProps> = () => {
     // Always poll for transcriptions, add debug logging
     try {
       console.log('[DEBUG] Polling for transcriptions...');
-      const response = await fetch(`${API_BASE_URL}/api/transcription/poll`);
+      const response = await fetch('/api/transcription/poll');
       console.log('[DEBUG] Poll response status:', response.status);
       
       if (response.ok) {
@@ -164,6 +168,34 @@ const Transcription: React.FC<TranscriptionProps> = () => {
     }
   };
 
+  // Local refinement using Groq API directly from frontend
+  const refineMessageLocally = async (rawContent: string) => {
+    if (!settings.groqApiKey.trim()) {
+      throw new Error('No Groq API key available');
+    }
+    
+    // Use the backend with the frontend API key
+    const response = await fetch('/api/transcription/refine', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        raw_text: rawContent,
+        prompt: promptMessage.trim(),
+        groq_api_key: settings.groqApiKey // Pass the frontend API key to backend
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return data.refined_text || rawContent;
+    } else {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || 'Refinement failed');
+    }
+  };
+
   const refineMessage = async (rawContent: string) => {
     if (!promptMessage.trim()) {
       console.log('[DEBUG] No prompt message available for refinement');
@@ -174,53 +206,81 @@ const Transcription: React.FC<TranscriptionProps> = () => {
     setIsRefining(true);
     
     try {
-      const response = await fetch(`${API_BASE_URL}/api/transcription/refine`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          raw_text: rawContent,
-          prompt: promptMessage.trim()
-        }),
+      let refinedText: string;
+      
+      // Try using frontend API key first
+      if (settings.groqApiKey.trim()) {
+        console.log('[DEBUG] Attempting refinement with frontend Groq API key...');
+        try {
+          refinedText = await refineMessageLocally(rawContent);
+          console.log('[DEBUG] Frontend API key refinement successful:', refinedText?.substring(0, 50) + '...');
+        } catch (localError) {
+          console.log('[DEBUG] Frontend API key refinement failed, falling back to backend stored key:', localError);
+          // Fallback to backend refinement with stored key
+          const response = await fetch('/api/transcription/refine', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+              raw_text: rawContent,
+              prompt: promptMessage.trim()
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            refinedText = data.refined_text || 'No refined text received';
+          } else {
+            throw new Error('Backend refinement also failed');
+          }
+        }
+      } else {
+        // No API key in frontend, use backend
+        console.log('[DEBUG] No frontend API key, using backend refinement...');
+        const response = await fetch('/api/transcription/refine', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            raw_text: rawContent,
+            prompt: promptMessage.trim()
+          }),
+        });
+
+        console.log('[DEBUG] Refinement response status:', response.status);
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('[DEBUG] Refinement successful:', data.refined_text?.substring(0, 50) + '...');
+          refinedText = data.refined_text || 'No refined text received';
+        } else {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          console.error('[DEBUG] Refinement error:', errorData.error);
+          
+          // Check if it's a Groq capacity issue
+          if (errorData.error && errorData.error.includes('over capacity')) {
+            console.log('[DEBUG] Groq API is over capacity, skipping refinement for now');
+            return;
+          }
+          
+          throw new Error(errorData.error || 'Refinement failed');
+        }
+      }
+      
+      const refinedMessage: Message = {
+        id: `refined_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'refined',
+        content: refinedText,
+        timestamp: new Date()
+      };
+      
+      setMessages(prev => {
+        console.log('[DEBUG] Adding refined message to', prev.length, 'existing messages');
+        return [...prev, refinedMessage];
       });
 
-      console.log('[DEBUG] Refinement response status:', response.status);
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('[DEBUG] Refinement successful:', data.refined_text?.substring(0, 50) + '...');
-        
-        const refinedMessage: Message = {
-          id: `refined_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          type: 'refined',
-          content: data.refined_text || 'No refined text received',
-          timestamp: new Date()
-        };
-        
-        setMessages(prev => {
-          console.log('[DEBUG] Adding refined message to', prev.length, 'existing messages');
-          return [...prev, refinedMessage];
-        });
-      } else {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        console.error('[DEBUG] Refinement error:', errorData.error);
-        
-        // Check if it's a Groq capacity issue
-        if (errorData.error && errorData.error.includes('over capacity')) {
-          console.log('[DEBUG] Groq API is over capacity, skipping refinement for now');
-          // Don't show error message for capacity issues - just skip refinement
-          return;
-        }
-        
-        const errorMessage: Message = {
-          id: `error_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          type: 'refined',
-          content: `Refinement failed: ${errorData.error}`,
-          timestamp: new Date()
-        };
-        setMessages(prev => [...prev, errorMessage]);
-      }
     } catch (error) {
       console.error('[DEBUG] Error refining transcription:', error);
       
@@ -251,7 +311,7 @@ const Transcription: React.FC<TranscriptionProps> = () => {
     setSaveStatus('idle');
     
     try {
-      const response = await fetch(`${API_BASE_URL}/api/transcription/prompt`, {
+      const response = await fetch('/api/transcription/prompt', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -303,36 +363,64 @@ const Transcription: React.FC<TranscriptionProps> = () => {
     const newListeningState = !isListening;
     
     try {
-      const endpoint = newListeningState 
-        ? '/api/transcription/listening/start' 
-        : '/api/transcription/listening/stop';
-      
-      console.log(`[DEBUG] ${newListeningState ? 'Starting' : 'Stopping'} listening...`);
-      
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('[DEBUG] Listening state changed:', data);
-        setIsListening(newListeningState);
-        
-        if (newListeningState) {
-          console.log('[DEBUG] Started real-time audio transcription');
-        } else {
-          console.log('[DEBUG] Stopped real-time audio transcription');
+      if (newListeningState) {
+        // Check if Groq API key is available
+        if (!settings.groqApiKey) {
+          alert('Please set your Groq API key in Settings before starting transcription.');
+          return;
         }
+
+        // Check if client audio is supported
+        if (!ClientAudioService.isSupported()) {
+          alert('Audio capture is not supported in this browser. Please use Chrome, Firefox, or Edge.');
+          return;
+        }
+
+        console.log('[DEBUG] Starting client-side audio capture...');
+        
+        // Start client-side audio capture
+        await clientAudioService.startListening(
+          (result: TranscriptionResult) => {
+            // Handle transcription result
+            console.log('[DEBUG] Received transcription:', result.transcript);
+            
+            const newMessage: Message = {
+              id: Date.now().toString(),
+              type: 'raw',
+              content: result.transcript,
+              timestamp: new Date()
+            };
+            
+            setMessages(prev => [...prev, newMessage]);
+          },
+          settings.groqApiKey
+        );
+
+        setIsListening(true);
+        console.log('[DEBUG] Started client-side audio transcription');
+        
       } else {
-        console.error('[DEBUG] Failed to change listening state:', response.status);
-        const errorData = await response.json();
-        console.error('[DEBUG] Error details:', errorData);
+        console.log('[DEBUG] Stopping client-side audio capture...');
+        
+        // Stop client-side audio capture
+        clientAudioService.stopListening();
+        setIsListening(false);
+        console.log('[DEBUG] Stopped client-side audio transcription');
       }
+      
     } catch (error) {
       console.error('[DEBUG] Error toggling listening state:', error);
+      
+      // Show user-friendly error message
+      if (error instanceof Error) {
+        alert(`Audio capture error: ${error.message}`);
+      } else {
+        alert('Failed to start audio capture. Please check your microphone permissions.');
+      }
+      
+      // Ensure state is consistent
+      setIsListening(false);
+      clientAudioService.stopListening();
     }
   };
 
