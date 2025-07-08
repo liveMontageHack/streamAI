@@ -2,6 +2,85 @@
 
 Ce guide vous explique comment déployer votre application StreamAI sur le web avec Netlify (frontend) et Railway (backend).
 
+## 🎤 Solution pour l'Audio en Production
+
+### Problème avec `sounddevice`
+La bibliothèque `sounddevice` utilisée dans `realtime_audio/audio_capture.py` **ne fonctionne pas en production** car:
+
+- ❌ Les serveurs web n'ont pas accès aux micros/périphériques audio
+- ❌ Railway/Netlify/Heroku ne supportent pas l'accès hardware direct
+- ❌ Environnements containerisés sans drivers audio système
+
+### ✅ Solution Disponible: Audio Côté Client
+
+**Architecture:**
+```
+Navigateur Client → Microphone → MediaRecorder → Chunks Audio → Backend API → Groq → Transcription
+```
+
+**Statut d'implémentation:**
+- ✅ Backend prêt: `obs/api_server_production.py` avec endpoint `/api/transcription/process-audio`
+- ✅ Service créé: `frontend/src/services/ClientAudioService.ts` (capture audio client)
+- ✅ Composant mis à jour: `frontend/src/components/Transcription.tsx`
+- ⚠️ **Audio capture actuel**: Les endpoints listening utilisent des mocks en production
+
+**Fonctionnalités disponibles:**
+- ✅ Endpoint pour traiter l'audio uploadé (`/api/transcription/process-audio`)
+- ✅ Validation des clés API Groq
+- ✅ Raffinement des transcriptions
+- ✅ Système de polling pour la communication temps réel
+- ✅ Gestion complète des paramètres utilisateur
+- ⚠️ Capture audio simulée (prête pour remplacement par solution client)
+
+### 🔧 Changements Techniques
+
+**Frontend (React/TypeScript):**
+```typescript
+// Remplacement de l'audio serveur par audio client
+import { clientAudioService } from '../services/ClientAudioService';
+
+// Démarrage capture audio
+await clientAudioService.startListening(onTranscription, groqApiKey);
+```
+
+**Backend (Production):**
+```python
+# Nouveau endpoint pour traiter l'audio uploadé
+@app.route('/api/transcription/process-audio', methods=['POST'])
+def process_audio():
+    # Traite les fichiers audio du frontend
+    # Utilise Groq API pour transcription
+    # Retourne résultats JSON
+```
+
+### 🛠️ Différences Dev vs Prod
+
+| Aspect | Développement Local | Production Web |
+|--------|-------------------|----------------|
+| **Audio Source** | `sounddevice` (micro serveur) | `MediaRecorder` (micro client) |
+| **Processing** | Python local | Upload → Python serveur |
+| **Latency** | Très faible | Faible (chunks 2s) |
+| **Permissions** | Aucune | Permission navigateur requise |
+| **Compatibilité** | Linux/Mac/Windows | Tous navigateurs modernes |
+
+### ⚠️ Considérations Production
+
+**Permissions Navigateur:**
+- HTTPS obligatoire pour accès microphone
+- Demande autorisation utilisateur automatique
+- Gestion des refus d'accès avec messages d'erreur
+
+**Performance:**
+- Chunks de 2 secondes pour équilibrer latence/qualité
+- Compression audio automatique (WebM/Opus optimal)
+- Upload asynchrone non-bloquant
+
+**Compatibilité:**
+- Chrome/Edge: Support complet WebM/Opus
+- Firefox: Support WebM/MP3
+- Safari: Support MP4/AAC (limité)
+- Mobile: Support variable selon navigateur
+
 ## 📋 Prérequis
 
 - Compte GitHub (gratuit)
